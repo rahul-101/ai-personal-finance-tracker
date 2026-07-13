@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+backend/venv/
+.venv/
+
+# Secrets and local settings
+.env
+backend/.env
+credentials/
+
+# Operating system and editor files
+.DS_Store
+.vscode/
+
+# Test and build output
+.pytest_cache/
+.coverage
+htmlcov/
