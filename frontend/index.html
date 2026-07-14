@@ -253,12 +253,22 @@
       </section>
     </main>
     <!-- Edit Transaction Modal -->
-    <div id="editTransactionModal" class="modal hidden">
-      <div class="modal-content">
+    <div id="editTransactionModal" class="modal hidden" aria-hidden="true">
+      <div
+        class="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="editTransactionTitle"
+      >
         <div class="modal-header">
-          <h2>Edit Transaction</h2>
+          <h2 id="editTransactionTitle">Edit Transaction</h2>
 
-          <button id="closeEditModalBtn" class="close-button" type="button">
+          <button
+            id="closeEditModalBtn"
+            class="close-button"
+            type="button"
+            aria-label="Close edit transaction dialog"
+          >
             &times;
           </button>
         </div>
@@ -278,6 +288,8 @@
             <label for="editCategory">Category</label>
             <input type="text" id="editCategory" placeholder="Category" />
           </div>
+
+          <p id="editModalError" class="form-error" role="alert" hidden></p>
         </div>
 
         <div class="modal-footer">

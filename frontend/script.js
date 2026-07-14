@@ -1,6 +1,8 @@
 console.log("script.js loaded successfully");
 
 const API_BASE_URL = "http://127.0.0.1:8000";
+let activeReviewTransaction = null;
+let editModalTrigger = null;
 
 function formatCurrency(value) {
   return "₹" + Number(value || 0).toLocaleString("en-IN");
@@ -59,31 +61,79 @@ async function rejectReviewTransaction(transactionId) {
 }
 
 async function editAndApproveReviewTransaction(transaction) {
-  const merchant = window.prompt("Merchant", transaction.merchant || "");
-  if (merchant === null) return;
+  openEditReviewModal(transaction, document.activeElement);
+}
 
-  const amountText = window.prompt("Amount", transaction.amount || "");
-  if (amountText === null) return;
+function getEditModalElements() {
+  return {
+    modal: document.getElementById("editTransactionModal"),
+    merchant: document.getElementById("editMerchant"),
+    amount: document.getElementById("editAmount"),
+    category: document.getElementById("editCategory"),
+    error: document.getElementById("editModalError")
+  };
+}
 
-  const amount = Number(amountText);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    alert("Amount must be a positive number.");
+function setEditModalError(message = "") {
+  const { error } = getEditModalElements();
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function openEditReviewModal(transaction, trigger) {
+  const { modal, merchant, amount, category } = getEditModalElements();
+  activeReviewTransaction = transaction;
+  editModalTrigger = trigger;
+  merchant.value = transaction.merchant || "";
+  amount.value = transaction.amount || "";
+  category.value = transaction.category || "Others";
+  setEditModalError();
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  merchant.focus();
+}
+
+function closeEditReviewModal() {
+  const { modal } = getEditModalElements();
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  activeReviewTransaction = null;
+  setEditModalError();
+  if (editModalTrigger instanceof HTMLElement) {
+    editModalTrigger.focus();
+  }
+  editModalTrigger = null;
+}
+
+async function saveEditedReviewTransaction() {
+  if (!activeReviewTransaction) return;
+
+  const { merchant, amount, category } = getEditModalElements();
+  const correctedMerchant = merchant.value.trim();
+  const correctedCategory = category.value.trim();
+  const correctedAmount = Number(amount.value);
+
+  if (!correctedMerchant || !correctedCategory) {
+    setEditModalError("Merchant and category are required.");
     return;
   }
 
-  const category = window.prompt("Category", transaction.category || "Others");
-  if (category === null || !category.trim()) return;
+  if (!Number.isFinite(correctedAmount) || correctedAmount <= 0) {
+    setEditModalError("Amount must be a positive number.");
+    return;
+  }
 
   try {
-    await reviewTransaction(transaction._id, "approve", {
-      merchant,
-      amount,
-      category,
+    await reviewTransaction(activeReviewTransaction._id, "approve", {
+      merchant: correctedMerchant,
+      amount: correctedAmount,
+      category: correctedCategory,
       review_note: "Corrected during dashboard review"
     });
+    closeEditReviewModal();
     await refreshDashboard();
   } catch (error) {
-    alert(error.message);
+    setEditModalError(error.message);
   }
 }
 
@@ -536,5 +586,15 @@ async function refreshDashboard() {
   await loadReceipts();
   await loadReviewRequired();
 }
+
+document.getElementById("closeEditModalBtn").addEventListener("click", closeEditReviewModal);
+document.getElementById("cancelEditBtn").addEventListener("click", closeEditReviewModal);
+document.getElementById("saveEditBtn").addEventListener("click", saveEditedReviewTransaction);
+document.getElementById("editTransactionModal").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeEditReviewModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && activeReviewTransaction) closeEditReviewModal();
+});
 
 refreshDashboard();
