@@ -1,6 +1,6 @@
 import unittest
 
-from services.gemini_ai import fallback_ai_result, validate_ai_result
+from services.ai_analysis import fallback_ai_result, validate_ai_result
 
 
 RULE_BASED_RESULT = {

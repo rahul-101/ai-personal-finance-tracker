@@ -1,17 +1,9 @@
-import os
 import json
 import re
-from dotenv import load_dotenv
-
-from google import genai
 from pydantic import ValidationError
 
-from models import GeminiEmailAnalysis
-
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+from models import AIEmailAnalysis
+from services.ai_client import generate_text, is_ai_configured
 
 
 DEFAULT_CATEGORIES = [
@@ -28,16 +20,6 @@ DEFAULT_CATEGORIES = [
     "Refund",
     "Others"
 ]
-
-
-def is_gemini_configured() -> bool:
-    if not GEMINI_API_KEY:
-        return False
-
-    if GEMINI_API_KEY.startswith("paste_"):
-        return False
-
-    return True
 
 
 def extract_json_from_text(response_text: str) -> dict:
@@ -73,7 +55,7 @@ def fallback_ai_result(rule_based_data: dict) -> dict:
         "confidence": 0.70,
         "payment_mode": "unknown",
         "masked_account": "",
-        "reason": "Gemini not configured or failed. Rule-based fallback used."
+        "reason": "AI provider not configured or failed. Rule-based fallback used."
     }
 
 
@@ -83,22 +65,20 @@ def validate_ai_result(candidate: dict, fallback: dict) -> dict:
     merged_result.update(candidate)
 
     try:
-        return GeminiEmailAnalysis.model_validate(merged_result).model_dump(mode="json")
+        return AIEmailAnalysis.model_validate(merged_result).model_dump(mode="json")
     except ValidationError:
-        fallback["reason"] = "Gemini returned invalid finance data. Rule-based fallback used."
+        fallback["reason"] = "AI provider returned invalid finance data. Rule-based fallback used."
         return fallback
 
 
-def analyze_transaction_email_with_gemini(
+def analyze_transaction_email(
     subject: str,
     sender: str,
     masked_email_text: str,
     rule_based_data: dict
 ) -> dict:
-    if not is_gemini_configured():
+    if not is_ai_configured():
         return fallback_ai_result(rule_based_data)
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""
 You are an AI assistant for a personal finance tracker.
@@ -149,12 +129,7 @@ Masked email text:
 """
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        response_text = getattr(response, "text", "")
+        response_text = generate_text(prompt)
 
         parsed_json = extract_json_from_text(response_text)
 
@@ -168,5 +143,6 @@ Masked email text:
 
     except Exception as error:
         fallback = fallback_ai_result(rule_based_data)
-        fallback["reason"] = f"Gemini error. Rule-based fallback used. Error: {str(error)}"
+        fallback["reason"] = f"AI provider error. Rule-based fallback used. Error: {str(error)}"
         return fallback
+

@@ -46,8 +46,8 @@ class Transaction(BaseModel):
         return value.strip() or None
 
 
-class GeminiEmailAnalysis(BaseModel):
-    """The only AI email-analysis shape the application is allowed to trust."""
+class AIEmailAnalysis(BaseModel):
+    """The provider-neutral AI email-analysis shape the application trusts."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -82,6 +82,10 @@ class GeminiEmailAnalysis(BaseModel):
     @classmethod
     def normalize_merchant(cls, value: str) -> str:
         return value.strip() or "Unknown"
+
+
+# Backwards-compatible name for external code using the earlier Gemini-only model.
+GeminiEmailAnalysis = AIEmailAnalysis
 
 
 class TransactionReviewDecision(BaseModel):

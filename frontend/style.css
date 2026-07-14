@@ -322,6 +322,11 @@ pre {
   font-weight: 600;
 }
 
+#aiConfigurationStatus,
+#aiProviderTestResult {
+  min-height: 1.5em;
+}
+
 .modal-footer {
   display: flex;
 

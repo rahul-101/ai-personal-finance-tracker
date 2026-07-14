@@ -1,23 +1,8 @@
-import os
+"""Provider-neutral receipt and bill analysis backed by services.ai_client."""
+
 import json
 import re
-from dotenv import load_dotenv
-from google import genai
-
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-
-def is_gemini_available() -> bool:
-    if not GEMINI_API_KEY:
-        return False
-
-    if GEMINI_API_KEY.startswith("paste_"):
-        return False
-
-    return True
+from services.ai_client import generate_text, is_ai_configured
 
 
 def extract_json_from_response(response_text: str) -> dict:
@@ -50,7 +35,7 @@ def fallback_receipt_result(ocr_text: str, fallback_merchant: str, fallback_amou
         "category": "Others",
         "payment_mode": "unknown",
         "confidence": 0.65,
-        "reason": "Gemini unavailable or failed. Rule-based OCR fallback used."
+        "reason": "AI provider unavailable or failed. Rule-based OCR fallback used."
     }
 
 
@@ -65,11 +50,11 @@ def fallback_bill_result(ocr_text: str, fallback_provider: str, fallback_amount,
         "due_date": fallback_due_date or "",
         "category": "Bills",
         "confidence": 0.65,
-        "reason": "Gemini unavailable or failed. Rule-based OCR fallback used."
+        "reason": "AI provider unavailable or failed. Rule-based OCR fallback used."
     }
 
 
-def analyze_receipt_ocr_with_gemini(
+def analyze_receipt_ocr(
     ocr_text: str,
     fallback_merchant: str,
     fallback_amount
@@ -80,10 +65,8 @@ def analyze_receipt_ocr_with_gemini(
         fallback_amount=fallback_amount
     )
 
-    if not is_gemini_available():
+    if not is_ai_configured():
         return fallback
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""
 You are an AI receipt extraction assistant for a personal finance tracker.
@@ -119,12 +102,7 @@ OCR text:
 """
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        response_text = getattr(response, "text", "")
+        response_text = generate_text(prompt)
 
         parsed = extract_json_from_response(response_text)
 
@@ -149,11 +127,11 @@ OCR text:
         return final_result
 
     except Exception as error:
-        fallback["reason"] = f"Gemini receipt extraction failed. Fallback used. Error: {str(error)}"
+        fallback["reason"] = f"AI provider receipt extraction failed. Fallback used. Error: {str(error)}"
         return fallback
 
 
-def analyze_bill_ocr_with_gemini(
+def analyze_bill_ocr(
     ocr_text: str,
     fallback_provider: str,
     fallback_amount,
@@ -166,10 +144,8 @@ def analyze_bill_ocr_with_gemini(
         fallback_due_date=fallback_due_date
     )
 
-    if not is_gemini_available():
+    if not is_ai_configured():
         return fallback
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
 
     prompt = f"""
 You are an AI bill extraction assistant for a personal finance tracker.
@@ -205,12 +181,7 @@ OCR text:
 """
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-
-        response_text = getattr(response, "text", "")
+        response_text = generate_text(prompt)
 
         parsed = extract_json_from_response(response_text)
 
@@ -238,5 +209,10 @@ OCR text:
         return final_result
 
     except Exception as error:
-        fallback["reason"] = f"Gemini bill extraction failed. Fallback used. Error: {str(error)}"
+        fallback["reason"] = f"AI provider bill extraction failed. Fallback used. Error: {str(error)}"
         return fallback
+
+
+# Compatibility aliases for callers upgrading from the Gemini-only implementation.
+analyze_receipt_ocr_with_gemini = analyze_receipt_ocr
+analyze_bill_ocr_with_gemini = analyze_bill_ocr

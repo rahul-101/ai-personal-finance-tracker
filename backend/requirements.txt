@@ -15,6 +15,9 @@ google-auth==2.55.1
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
 google-genai==2.10.0
+# Optional providers (installed only when you select them):
+# openai>=1.0.0
+# anthropic>=0.40.0
 googleapis-common-protos==1.75.0
 h11==0.16.0
 httpcore==1.0.9

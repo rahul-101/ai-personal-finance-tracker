@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes.gemini_models import router as gemini_models_router
+from routes.ai_settings import router as ai_settings_router
 from routes.dashboard import router as dashboard_router
 from routes.uploads import router as uploads_router
 from routes.export import router as export_router
@@ -12,7 +12,7 @@ from database import check_mongodb_connection, create_database_indexes
 from routes.transactions import router as transactions_router
 from routes.gmail_auth import router as gmail_auth_router
 from routes.gmail_sync import router as gmail_sync_router
-from routes.ai_test import router as ai_test_router
+from routes.ai_examples import router as ai_examples_router
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +86,9 @@ app.include_router(gmail_auth_router)
 
 app.include_router(gmail_sync_router)
 
-app.include_router(ai_test_router)
+app.include_router(ai_examples_router)
 
-app.include_router(gemini_models_router)
+app.include_router(ai_settings_router)
 
 app.include_router(dashboard_router)
 

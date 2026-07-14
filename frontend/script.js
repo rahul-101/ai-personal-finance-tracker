@@ -145,6 +145,39 @@ function downloadJson() {
   window.open(`${API_BASE_URL}/export/json`, "_blank");
 }
 
+async function loadAIConfiguration() {
+  const status = document.getElementById("aiConfigurationStatus");
+  try {
+    const response = await fetch(`${API_BASE_URL}/ai/configuration`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Unable to load AI configuration");
+
+    status.textContent = result.configured
+      ? `Active provider: ${result.provider} (${result.model})`
+      : `Provider '${result.provider}' is not configured. Update backend/.env and restart the API.`;
+  } catch (error) {
+    status.textContent = `AI configuration unavailable: ${error.message}`;
+  }
+}
+
+async function testAIProvider() {
+  const button = document.getElementById("testAiProviderBtn");
+  const resultBox = document.getElementById("aiProviderTestResult");
+  button.disabled = true;
+  resultBox.textContent = "Testing provider...";
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/ai/test`, { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Provider test failed");
+    resultBox.textContent = `${result.message}: ${result.provider} (${result.model}).`;
+  } catch (error) {
+    resultBox.textContent = `Provider test failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadDashboardSummary() {
   try {
     const response = await fetch(`${API_BASE_URL}/dashboard/summary`);
@@ -579,6 +612,7 @@ async function loadReceipts() {
 }
 
 async function refreshDashboard() {
+  await loadAIConfiguration();
   await loadDashboardSummary();
   await loadLatestTransactions();
   await loadGmailLogs();
@@ -590,6 +624,7 @@ async function refreshDashboard() {
 document.getElementById("closeEditModalBtn").addEventListener("click", closeEditReviewModal);
 document.getElementById("cancelEditBtn").addEventListener("click", closeEditReviewModal);
 document.getElementById("saveEditBtn").addEventListener("click", saveEditedReviewTransaction);
+document.getElementById("testAiProviderBtn").addEventListener("click", testAIProvider);
 document.getElementById("editTransactionModal").addEventListener("click", (event) => {
   if (event.target === event.currentTarget) closeEditReviewModal();
 });

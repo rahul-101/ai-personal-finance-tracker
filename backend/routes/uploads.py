@@ -14,8 +14,8 @@ from services.ocr_parser import extract_merchant_from_receipt
 from services.ocr_parser import extract_due_date
 from services.ocr_parser import extract_provider_from_bill
 
-from services.gemini_ocr import analyze_receipt_ocr_with_gemini
-from services.gemini_ocr import analyze_bill_ocr_with_gemini
+from services.ai_ocr import analyze_receipt_ocr
+from services.ai_ocr import analyze_bill_ocr
 
 
 router = APIRouter()
@@ -58,7 +58,7 @@ def upload_receipt(file: UploadFile = File(...)):
 
         fallback_merchant = extract_merchant_from_receipt(ocr_text)
 
-        ai_result = analyze_receipt_ocr_with_gemini(
+        ai_result = analyze_receipt_ocr(
             ocr_text=ocr_text,
             fallback_merchant=fallback_merchant,
             fallback_amount=fallback_amount
@@ -116,7 +116,7 @@ def upload_receipt(file: UploadFile = File(...)):
 
         return {
             "status": "success",
-            "message": "Receipt processed successfully with Gemini enhancement",
+            "message": "Receipt processed successfully with AI enhancement",
             "transaction_id": transaction_id,
             "merchant": merchant,
             "amount": amount,
@@ -150,7 +150,7 @@ def upload_bill(file: UploadFile = File(...)):
 
         fallback_due_date = extract_due_date(ocr_text)
 
-        ai_result = analyze_bill_ocr_with_gemini(
+        ai_result = analyze_bill_ocr(
             ocr_text=ocr_text,
             fallback_provider=fallback_provider,
             fallback_amount=fallback_amount,
@@ -197,7 +197,7 @@ def upload_bill(file: UploadFile = File(...)):
 
         return {
             "status": "success",
-            "message": "Bill processed successfully with Gemini enhancement",
+            "message": "Bill processed successfully with AI enhancement",
             "bill_id": str(insert_result.inserted_id),
             "provider": provider,
             "bill_type": ai_result.get("bill_type", "Bill"),

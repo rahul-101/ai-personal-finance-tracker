@@ -1,12 +1,12 @@
 from fastapi import APIRouter
-from services.gemini_ai import analyze_transaction_email_with_gemini
+from services.ai_analysis import analyze_transaction_email
 
 
 router = APIRouter()
 
 
-@router.get("/ai/gemini-test")
-def gemini_test():
+@router.get("/ai/example-analysis")
+def example_analysis():
     subject = "Transaction Alert"
     sender = "alerts@bank.com"
 
@@ -22,7 +22,7 @@ def gemini_test():
         "transaction_type": "debit"
     }
 
-    result = analyze_transaction_email_with_gemini(
+    result = analyze_transaction_email(
         subject=subject,
         sender=sender,
         masked_email_text=masked_email_text,
@@ -31,5 +31,5 @@ def gemini_test():
 
     return {
         "status": "success",
-        "gemini_result": result
+        "analysis_result": result
     }

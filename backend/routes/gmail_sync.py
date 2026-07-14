@@ -10,7 +10,7 @@ from routes.gmail_auth import load_gmail_credentials
 from services.email_parser import parse_transaction_email
 from services.email_parser import mask_sensitive_numbers
 from services.email_parser import normalize_text
-from services.gemini_ai import analyze_transaction_email_with_gemini
+from services.ai_analysis import analyze_transaction_email
 
 
 router = APIRouter()
@@ -243,7 +243,7 @@ def sync_gmail_transactions(max_results: int = 20):
                 combined_text = normalize_text(subject + " " + body)
                 masked_email_text = mask_sensitive_numbers(combined_text)
 
-                ai_result = analyze_transaction_email_with_gemini(
+                ai_result = analyze_transaction_email(
                     subject=subject,
                     sender=sender,
                     masked_email_text=masked_email_text,

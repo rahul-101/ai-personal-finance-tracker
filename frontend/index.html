@@ -19,6 +19,17 @@
         <button onclick="syncGmailTransactions()">Sync Gmail</button>
       </header>
 
+      <section class="card" aria-labelledby="aiSettingsTitle">
+        <h2 id="aiSettingsTitle">AI Settings</h2>
+        <p>
+          Provider selection is managed securely in <code>backend/.env</code>.
+          API keys are never exposed in this dashboard.
+        </p>
+        <p id="aiConfigurationStatus">Loading AI configuration...</p>
+        <button id="testAiProviderBtn" type="button">Test AI Provider</button>
+        <p id="aiProviderTestResult" role="status" aria-live="polite"></p>
+      </section>
+
       <section class="grid stats-grid">
         <div class="card stat-card">
           <p>Total Spend</p>
@@ -180,7 +191,7 @@
         <div class="card">
           <h2>Upload Receipt</h2>
           <p>
-            Upload a receipt image. OCR and Gemini will extract merchant,
+            Upload a receipt image. OCR and the configured AI provider will extract merchant,
             amount, category, and payment mode.
           </p>
 
@@ -193,7 +204,7 @@
         <div class="card">
           <h2>Upload Bill</h2>
           <p>
-            Upload a bill screenshot/image. OCR and Gemini will extract
+            Upload a bill screenshot/image. OCR and the configured AI provider will extract
             provider, amount, bill type, and due date.
           </p>
 
