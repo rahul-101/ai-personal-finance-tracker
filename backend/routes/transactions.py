@@ -3,6 +3,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import ReturnDocument
 from datetime import datetime, timezone
+from typing import Literal
 
 from models import Transaction, TransactionReviewDecision
 from database import transactions_collection
@@ -75,14 +76,22 @@ def add_transaction(transaction: Transaction):
 def get_transactions(
     limit: int = Query(default=20, ge=1, le=100),
     skip: int = Query(default=0, ge=0),
+    status: Literal["review_required", "confirmed", "rejected"] | None = Query(default=None),
 ):
     """
     Fetch all transactions from MongoDB.
     """
 
     try:
+        query = {}
+        if status == "confirmed":
+            # Older manual records predate review statuses and remain confirmed.
+            query = {"$or": [{"status": "confirmed"}, {"status": {"$exists": False}}]}
+        elif status:
+            query = {"status": status}
+
         transactions = list(
-            transactions_collection.find()
+            transactions_collection.find(query)
             .sort("created_at", -1)
             .skip(skip)
             .limit(limit)
@@ -94,6 +103,7 @@ def get_transactions(
         return {
             "status": "success",
             "count": len(transactions),
+            "filter": {"status": status},
             "transactions": transactions
         }
 

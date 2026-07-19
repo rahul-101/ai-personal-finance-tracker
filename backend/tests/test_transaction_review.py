@@ -1,11 +1,11 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from bson import ObjectId
 from fastapi import HTTPException
 
 from models import TransactionReviewDecision
-from routes.transactions import review_transaction
+from routes.transactions import get_transactions, review_transaction
 
 
 class FakeTransactionsCollection:
@@ -81,3 +81,18 @@ class TransactionReviewRouteTests(unittest.TestCase):
                 )
 
         self.assertEqual(context.exception.status_code, 409)
+
+    def test_review_required_filter_queries_only_pending_transactions(self):
+        collection = MagicMock()
+        cursor = MagicMock()
+        collection.find.return_value = cursor
+        cursor.sort.return_value = cursor
+        cursor.skip.return_value = cursor
+        cursor.limit.return_value = [self.transaction]
+
+        with patch("routes.transactions.transactions_collection", collection):
+            result = get_transactions(status="review_required")
+
+        collection.find.assert_called_once_with({"status": "review_required"})
+        self.assertEqual(result["filter"], {"status": "review_required"})
+        self.assertEqual(result["count"], 1)

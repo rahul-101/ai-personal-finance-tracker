@@ -12,7 +12,16 @@ def get_ai_configuration_status():
         "provider": configuration.provider,
         "model": configuration.model,
         "configured": is_ai_configured(),
-        "supported_providers": ["gemini", "openai", "anthropic", "ollama"],
+        "supported_providers": [
+            "gemini",
+            "openai",
+            "anthropic",
+            "groq",
+            "mistral",
+            "deepseek",
+            "xai",
+            "together",
+        ],
     }
 
 

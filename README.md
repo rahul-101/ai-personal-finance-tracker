@@ -6,7 +6,7 @@ A learning project that imports personal-finance data from manual entry, Gmail t
 
 - Manual transaction creation and paginated transaction listing
 - Gmail OAuth token storage with Fernet encryption and transaction-email parsing
-- Receipt and bill OCR with optional Gemini enrichment
+- Receipt and bill OCR with optional AI-provider enrichment
 - Dashboard summaries plus CSV and JSON exports
 
 ## Local setup
@@ -63,11 +63,36 @@ AI_API_KEY=your-provider-key
 AI_BASE_URL=
 ```
 
-Supported values for `AI_PROVIDER` are `gemini`, `openai`, `anthropic`, and
-`ollama`. OpenAI and Anthropic SDKs are optional dependencies; install their SDK
-when selecting either provider. Ollama uses its local HTTP API and defaults to
-`http://127.0.0.1:11434` when `AI_BASE_URL` is empty. Existing `GEMINI_API_KEY`
-and `GEMINI_MODEL` settings continue to work during migration.
+Supported cloud providers are `gemini`, `openai`, `anthropic`, `groq`,
+`mistral`, `deepseek`, `xai`, and `together`. Gemini and Anthropic use their
+dedicated SDKs. OpenAI, Groq, Mistral, DeepSeek, xAI, and Together AI use the
+shared OpenAI-compatible adapter.
+
+Use the same three variables for every provider. Set `AI_MODEL` to a model ID
+available in the selected provider account:
+
+```env
+# Gemini
+AI_PROVIDER=gemini
+AI_MODEL=gemini-2.5-flash
+AI_API_KEY=your-gemini-key
+
+# OpenAI-compatible example: Groq
+AI_PROVIDER=groq
+AI_MODEL=your-groq-model-id
+AI_API_KEY=your-groq-key
+
+# Anthropic
+AI_PROVIDER=anthropic
+AI_MODEL=your-anthropic-model-id
+AI_API_KEY=your-anthropic-key
+```
+
+`AI_API_KEY` can be replaced by the provider-specific environment variable,
+such as `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, or
+`TOGETHER_API_KEY`. Install `openai` for OpenAI-compatible providers and
+`anthropic` for Anthropic before selecting them. Existing `GEMINI_API_KEY` and
+`GEMINI_MODEL` settings continue to work during migration.
 
 The dashboard Settings panel reads `GET /ai/configuration` and can run a small
 provider health check through `POST /ai/test`. Neither endpoint returns API keys.
@@ -76,4 +101,4 @@ provider health check through `POST /ai/test`. Neither endpoint returns API keys
 
 - Never commit `.env`, OAuth credentials, or real finance data.
 - The current Gmail implementation is for one local learning user. Before deployment, add user authentication, OAuth state validation, and secure HTTPS-only configuration.
-- Gemini output must be treated as untrusted data and validated before storage.
+- AI-provider output must be treated as untrusted data and validated before storage.

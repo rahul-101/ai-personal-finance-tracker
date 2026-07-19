@@ -26,7 +26,17 @@ DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
     "openai": "gpt-4.1-mini",
     "anthropic": "claude-3-5-haiku-latest",
-    "ollama": "llama3.2",
+}
+
+# These providers expose the OpenAI chat-completions API shape. Each still uses
+# its own API key and explicit AI_MODEL value from the environment.
+OPENAI_COMPATIBLE_BASE_URLS = {
+    "openai": None,
+    "groq": "https://api.groq.com/openai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "xai": "https://api.x.ai/v1",
+    "together": "https://api.together.xyz/v1",
 }
 
 
@@ -37,15 +47,17 @@ def get_ai_configuration() -> AIConfiguration:
     model = os.getenv("AI_MODEL") or legacy_model or DEFAULT_MODELS.get(provider, "")
     provider_key = os.getenv(f"{provider.upper()}_API_KEY")
     api_key = os.getenv("AI_API_KEY") or provider_key
-    base_url = os.getenv("AI_BASE_URL")
+    base_url = os.getenv("AI_BASE_URL") or OPENAI_COMPATIBLE_BASE_URLS.get(provider)
     return AIConfiguration(provider=provider, model=model, api_key=api_key, base_url=base_url)
 
 
 def is_ai_configured() -> bool:
     configuration = get_ai_configuration()
-    if configuration.provider == "ollama":
-        return bool(configuration.model)
-    return bool(configuration.api_key and not configuration.api_key.startswith("paste_"))
+    return bool(
+        configuration.model
+        and configuration.api_key
+        and not configuration.api_key.startswith("paste_")
+    )
 
 
 def generate_text(prompt: str) -> str:
@@ -62,7 +74,7 @@ def generate_text(prompt: str) -> str:
             response = client.models.generate_content(model=configuration.model, contents=prompt)
             return getattr(response, "text", "")
 
-        if configuration.provider == "openai":
+        if configuration.provider in OPENAI_COMPATIBLE_BASE_URLS:
             from openai import OpenAI
 
             client = OpenAI(api_key=configuration.api_key, base_url=configuration.base_url)
@@ -84,15 +96,6 @@ def generate_text(prompt: str) -> str:
             )
             return "".join(block.text for block in response.content if hasattr(block, "text"))
 
-        if configuration.provider == "ollama":
-            base_url = configuration.base_url or "http://127.0.0.1:11434"
-            response = requests.post(
-                f"{base_url.rstrip('/')}/api/generate",
-                json={"model": configuration.model, "prompt": prompt, "stream": False, "format": "json"},
-                timeout=60,
-            )
-            response.raise_for_status()
-            return response.json().get("response", "")
     except ImportError as error:
         raise AIProviderError(
             f"Install the SDK for provider '{configuration.provider}' before using it"
@@ -104,5 +107,5 @@ def generate_text(prompt: str) -> str:
 
     raise AIProviderError(
         f"Unsupported AI_PROVIDER '{configuration.provider}'. "
-        "Use gemini, openai, anthropic, or ollama."
+        "Use gemini, openai, anthropic, groq, mistral, deepseek, xai, or together."
     )
