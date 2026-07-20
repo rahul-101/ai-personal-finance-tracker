@@ -1,9 +1,12 @@
+import re
+
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
 from datetime import datetime
 
 from database import transactions_collection
 from database import gmail_logs_collection
+from database import gmail_sync_runs_collection
 from database import bills_collection
 
 
@@ -43,13 +46,36 @@ def get_month_from_transaction(transaction):
     return "Unknown"
 
 
+def classify_financial_type(transaction_type: str) -> str:
+    """Map legacy values into the richer single-user finance classifications."""
+    return {
+        "credit": "income",
+        "income": "income",
+        "refund": "refund",
+        "investment": "investment",
+        "transfer": "transfer",
+        "debit": "expense",
+        "expense": "expense",
+        "bill": "expense",
+        "unknown": "expense",
+    }.get(transaction_type, "expense")
+
+
 @router.get("/dashboard/summary")
-def dashboard_summary():
+def dashboard_summary(month: str | None = None):
+    if month and not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(status_code=422, detail="month must use YYYY-MM format")
+
     try:
         transactions = list(transactions_collection.find())
+        if month:
+            transactions = [transaction for transaction in transactions if get_month_from_transaction(transaction) == month]
 
-        total_spend = 0
-        total_credit = 0
+        total_expenses = 0
+        total_income = 0
+        total_refunds = 0
+        total_investments = 0
+        total_transfers = 0
         total_transactions = len(transactions)
         review_required_count = 0
 
@@ -60,7 +86,7 @@ def dashboard_summary():
 
         for tx in transactions:
             amount = float(tx.get("amount", 0))
-            transaction_type = tx.get("transaction_type", "debit")
+            financial_type = classify_financial_type(tx.get("transaction_type", "debit"))
             category = tx.get("category", "Others")
             source = tx.get("source", "unknown")
             merchant = tx.get("merchant", "Unknown")
@@ -70,10 +96,16 @@ def dashboard_summary():
             if status == "review_required":
                 review_required_count = review_required_count + 1
 
-            if transaction_type == "credit":
-                total_credit = total_credit + amount
+            if financial_type == "income":
+                total_income = total_income + amount
+            elif financial_type == "refund":
+                total_refunds = total_refunds + amount
+            elif financial_type == "investment":
+                total_investments = total_investments + amount
+            elif financial_type == "transfer":
+                total_transfers = total_transfers + amount
             else:
-                total_spend = total_spend + amount
+                total_expenses = total_expenses + amount
 
                 category_summary[category] = category_summary.get(category, 0) + amount
                 merchant_summary[merchant] = merchant_summary.get(merchant, 0) + amount
@@ -137,10 +169,18 @@ def dashboard_summary():
         return {
             "status": "success",
             "summary": {
-                "total_spend": round(total_spend, 2),
-                "total_credit": round(total_credit, 2),
-                "net_balance": round(total_credit - total_spend, 2),
+                # Legacy fields are retained for existing clients.
+                "total_spend": round(total_expenses, 2),
+                "total_credit": round(total_income + total_refunds, 2),
+                "net_balance": round(total_income + total_refunds - total_expenses - total_investments, 2),
+                "total_income": round(total_income, 2),
+                "total_expenses": round(total_expenses, 2),
+                "total_refunds": round(total_refunds, 2),
+                "total_investments": round(total_investments, 2),
+                "total_transfers": round(total_transfers, 2),
+                "net_cash_flow": round(total_income + total_refunds - total_expenses - total_investments, 2),
                 "total_transactions": total_transactions,
+                "selected_month": month,
                 "review_required_count": review_required_count,
                 "ignored_email_count": ignored_email_count,
                 "review_log_count": review_log_count,
@@ -209,6 +249,19 @@ def dashboard_gmail_logs(limit: int = 20):
             status_code=500,
             detail=f"Failed to load Gmail logs: {str(error)}"
         )
+
+
+@router.get("/dashboard/gmail-sync-runs")
+def dashboard_gmail_sync_runs(limit: int = 10):
+    try:
+        runs = list(gmail_sync_runs_collection.find().sort("created_at", -1).limit(limit))
+        return {
+            "status": "success",
+            "count": len(runs),
+            "runs": [convert_mongo_document(run) for run in runs],
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Failed to load Gmail sync runs: {str(error)}")
 
 
 @router.get("/dashboard/review-required")

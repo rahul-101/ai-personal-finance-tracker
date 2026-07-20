@@ -400,7 +400,16 @@ def extract_merchant(text: str) -> str:
 def extract_transaction_type(text: str) -> str:
     lower_text = text.lower()
 
-    if "credited" in lower_text or "refund" in lower_text or "received" in lower_text:
+    if "refund" in lower_text:
+        return "refund"
+
+    if any(keyword in lower_text for keyword in ("mutual fund", "sip", "stock", "share purchase", "investment")):
+        return "investment"
+
+    if any(keyword in lower_text for keyword in ("transferred to", "account transfer", "fund transfer")):
+        return "transfer"
+
+    if "credited" in lower_text or "received" in lower_text:
         return "credit"
 
     if "atm-wdl" in lower_text or "withdrawn" in lower_text:

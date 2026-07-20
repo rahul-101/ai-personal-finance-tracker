@@ -1,11 +1,12 @@
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from googleapiclient.discovery import build
 
 from database import transactions_collection
 from database import gmail_logs_collection
+from database import gmail_sync_runs_collection
 from routes.gmail_auth import load_gmail_credentials
 from services.email_parser import parse_transaction_email
 from services.email_parser import mask_sensitive_numbers
@@ -14,6 +15,19 @@ from services.ai_analysis import analyze_transaction_email
 
 
 router = APIRouter()
+
+
+def record_sync_run(source: str, status: str, summary: dict | None = None, error: str | None = None) -> None:
+    """Keep a short, credential-free audit trail of Gmail sync attempts."""
+    gmail_sync_runs_collection.insert_one(
+        {
+            "source": source,
+            "status": status,
+            "summary": summary or {},
+            "error": error[:300] if error else None,
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
 
 
 def get_header(headers, header_name):
@@ -148,7 +162,7 @@ def preview_gmail_messages(max_results: int = 10):
 
 
 @router.post("/gmail/sync")
-def sync_gmail_transactions(max_results: int = 20):
+def sync_gmail_transactions(max_results: int = 20, sync_source: str = "manual"):
     try:
         gmail_service = get_gmail_service()
 
@@ -281,6 +295,13 @@ def sync_gmail_transactions(max_results: int = 20):
 
                 
                 if confidence < 0.75:
+                    proposed_transaction = {
+                        "date": str(ai_result.get("date", "")),
+                        "merchant": ai_result.get("merchant", "Unknown"),
+                        "amount": ai_result.get("amount", 0),
+                        "category": ai_result.get("category", "Others"),
+                        "transaction_type": ai_result.get("transaction_type", "expense"),
+                    }
                     gmail_logs_collection.insert_one(
                         {
                             "gmail_message_id": message_id,
@@ -289,6 +310,7 @@ def sync_gmail_transactions(max_results: int = 20):
                             "status": "review_required_not_inserted",
                             "reason": ai_result.get("reason", "Low AI confidence"),
                             "ai_confidence": confidence,
+                            "proposed_transaction": proposed_transaction,
                             "created_at": datetime.utcnow()
                         }
                     )
@@ -376,16 +398,20 @@ def sync_gmail_transactions(max_results: int = 20):
                     }
                 )
 
-        return {
+        result = {
             "status": "success",
             "summary": summary,
             "details": processed_details
         }
+        record_sync_run(sync_source, "success", summary=summary)
+        return result
 
-    except HTTPException:
+    except HTTPException as error:
+        record_sync_run(sync_source, "failed", error=str(error.detail))
         raise
 
     except Exception as error:
+        record_sync_run(sync_source, "failed", error=str(error))
         raise HTTPException(
             status_code=500,
             detail=f"Gmail sync failed: {str(error)}"

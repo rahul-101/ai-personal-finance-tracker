@@ -86,6 +86,13 @@ def create_authorization_url() -> str:
     return authorization_url
 
 
+def get_connected_gmail_address(credentials) -> str:
+    """Read the Gmail account address using the already-authorized read-only scope."""
+    gmail_service = build("gmail", "v1", credentials=credentials)
+    profile = gmail_service.users().getProfile(userId="me").execute()
+    return profile.get("emailAddress", "")
+
+
 @router.get("/auth/google")
 def google_login():
     try:
@@ -131,6 +138,12 @@ def google_callback(code: str, state: str):
 
         credentials = flow.credentials
 
+        try:
+            connected_email = get_connected_gmail_address(credentials)
+        except Exception:
+            logger.warning("Could not read connected Gmail address during OAuth callback")
+            connected_email = ""
+
         token_json = credentials.to_json()
 
         encrypted_token = encrypt_text(token_json)
@@ -146,7 +159,8 @@ def google_callback(code: str, state: str):
                     "provider": "gmail",
                     "encrypted_token_json": encrypted_token,
                     "scopes": GMAIL_SCOPES,
-                    "updated_at": datetime.now(timezone.utc)
+                    "updated_at": datetime.now(timezone.utc),
+                    **({"email_address": connected_email} if connected_email else {}),
                 }
             },
             upsert=True
@@ -177,13 +191,38 @@ def gmail_status():
     )
 
     if token_doc:
+        try:
+            credentials = load_gmail_credentials()
+            if not credentials:
+                raise RuntimeError("No usable Gmail credentials")
+        except Exception:
+            logger.warning("Gmail authorization needs reconnection")
+            return {
+                "connected": False,
+                "reconnect_required": True,
+                "message": "Gmail authorization expired or was revoked. Reconnect Gmail to continue.",
+            }
+
+        email_address = token_doc.get("email_address", "")
+        if not email_address:
+            try:
+                email_address = get_connected_gmail_address(credentials)
+                if email_address:
+                    gmail_tokens_collection.update_one(
+                        {"user_id": DEMO_USER_ID, "provider": "gmail"},
+                        {"$set": {"email_address": email_address, "updated_at": datetime.now(timezone.utc)}},
+                    )
+            except Exception:
+                logger.warning("Could not backfill connected Gmail address")
         return {
             "connected": True,
-            "message": "Gmail is connected"
+            "message": "Gmail is connected",
+            "email_address": email_address,
         }
 
     return {
         "connected": False,
+        "reconnect_required": False,
         "message": "Gmail is not connected"
     }
 

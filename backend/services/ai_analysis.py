@@ -106,9 +106,9 @@ Required JSON schema:
   "date": "YYYY-MM-DD or empty string",
   "merchant": "merchant name",
   "amount": 0,
-  "category": "Food or Shopping or Transport or Bills or Groceries or Entertainment or Health or Travel or Education or Income or Refund or Others",
+  "category": "Food or Shopping or Transport or Bills or Groceries or Entertainment or Health or Travel or Education or Income or Refund or Investment or Transfer or Others",
   "source": "email",
-  "transaction_type": "debit or credit or refund or bill or unknown",
+  "transaction_type": "income or expense or investment or transfer or refund (legacy debit or credit is also allowed)",
   "confidence": 0.0,
   "payment_mode": "card or upi or netbanking or wallet or cash or unknown",
   "masked_account": "masked account/card if available",
@@ -145,4 +145,3 @@ Masked email text:
         fallback = fallback_ai_result(rule_based_data)
         fallback["reason"] = f"AI provider error. Rule-based fallback used. Error: {str(error)}"
         return fallback
-

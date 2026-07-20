@@ -30,11 +30,19 @@ gmail_tokens_collection = db["gmail_tokens"]
 
 gmail_logs_collection = db["gmail_logs"]
 
+gmail_sync_runs_collection = db["gmail_sync_runs"]
+
 oauth_states_collection = db["oauth_states"]
 
 receipts_collection = db["receipts"]
 
 bills_collection = db["bills"]
+
+ai_insights_collection = db["ai_insights"]
+
+budgets_collection = db["budgets"]
+
+profile_collection = db["profile"]
 
 
 def check_mongodb_connection():
@@ -68,6 +76,7 @@ def create_database_indexes() -> None:
         name="unique_gmail_log",
     )
     gmail_logs_collection.create_index([("created_at", -1)])
+    gmail_sync_runs_collection.create_index([("created_at", -1)])
     oauth_states_collection.create_index(
         [("expires_at", 1)],
         expireAfterSeconds=0,
@@ -75,3 +84,11 @@ def create_database_indexes() -> None:
     )
     receipts_collection.create_index([("created_at", -1)])
     bills_collection.create_index([("created_at", -1)])
+    ai_insights_collection.create_index([("created_at", -1)])
+    # Replace the first single-budget index with one budget document per month.
+    try:
+        budgets_collection.drop_index("unique_budget_scope")
+    except Exception:
+        pass
+    budgets_collection.create_index([("scope", 1), ("month", 1)], unique=True, name="unique_budget_month")
+    profile_collection.create_index([("scope", 1)], unique=True, name="unique_profile_scope")

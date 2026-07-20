@@ -37,6 +37,21 @@ h1, h2 { margin: 0; letter-spacing: -.04em; } h1 { font-size: clamp(1.7rem, 3vw,
 .metric-card { padding: 22px; border: 1px solid #e0e7f1; border-radius: 16px; background: #fff; box-shadow: 0 4px 16px rgba(15, 23, 42, .04); }
 .metric-card p { margin: 0; color: #64748b; font-weight: 650; }.metric-card strong { display: block; margin-top: 18px; font-size: 2rem; }
 :root[data-theme="dark"] .metric-card { border-color: #293750; background: #182337; }:root[data-theme="dark"] .metric-card p { color: #a9b7cb; }
+.insight-card { padding: 14px; border: 1px solid #e0e7f1; border-radius: 12px; }
+.insight-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid #f59e0b; border-radius: 12px; color: #713f12; background: #fffbeb; }
+.insight-helper, .ai-insight-disclaimer, .ai-insight-provider { color: #64748b; }
+.insight-helper, .ai-insight-disclaimer { font-size: .875rem; }.ai-insight-provider { margin-top: 8px; font-size: .75rem; }
+.ai-insight-result { padding: 16px; border: 1px solid #c4b5fd; border-radius: 12px; color: #312e81; background: #faf5ff; }
+:root[data-theme="dark"] .insight-card { border-color: #40506a; }
+:root[data-theme="dark"] .insight-alert { border-color: #fbbf24; color: #fef3c7; background: #4a3413; }
+:root[data-theme="dark"] .insight-helper, :root[data-theme="dark"] .ai-insight-disclaimer, :root[data-theme="dark"] .ai-insight-provider { color: #a9b7cb; }
+:root[data-theme="dark"] .ai-insight-result { border-color: #8b5cf6; color: #f5f3ff; background: #30205c; }
+.budget-progress { height: 12px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.budget-progress span { display: block; height: 100%; border-radius: inherit; transition: width .2s ease; }
+.budget-healthy { background: #16a34a; }.budget-warning { background: #f59e0b; }.budget-danger { background: #dc2626; }
+.budget-healthy-text { color: #15803d !important; }.budget-warning-text { color: #b45309 !important; }.budget-danger-text { color: #b91c1c !important; }
+:root[data-theme="dark"] .budget-progress { background: #334155; }
+:root[data-theme="dark"] .budget-healthy-text { color: #86efac !important; }:root[data-theme="dark"] .budget-warning-text { color: #fcd34d !important; }:root[data-theme="dark"] .budget-danger-text { color: #fca5a5 !important; }
 .metric-card select { min-width: 180px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 9px; color: inherit; background: transparent; }
 .metric-card table { min-width: 760px; font-size: .9rem; }
 .metric-card th { padding: 12px; color: #64748b; border-bottom: 1px solid #dbe4ef; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
