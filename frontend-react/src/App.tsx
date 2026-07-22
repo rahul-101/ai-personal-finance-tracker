@@ -17,6 +17,17 @@ const gmailStatusLabels: Record<string, string> = {
 const formatGmailStatus = (status: string) =>
   gmailStatusLabels[status] ?? `Ignored (${status.replaceAll("_", " ")})`;
 
+const kpiIcons: Record<string, string> = {
+  Income: "↗",
+  Expenses: "↙",
+  Investments: "◈",
+  Refunds: "↩",
+  Transfers: "⇄",
+  "Net cash flow": "◎",
+  Transactions: "≡",
+  "Pending review": "!",
+};
+
 type DashboardSummary = {
   total_spend: number;
   total_credit: number;
@@ -170,6 +181,8 @@ export default function App() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryError, setSummaryError] = useState("");
   const [reportMonth, setReportMonth] = useState("");
+  const [reportDateFrom, setReportDateFrom] = useState("");
+  const [reportDateTo, setReportDateTo] = useState("");
   const [reviewTransactions, setReviewTransactions] = useState<ReviewTransaction[]>([]);
   const [reviewLogs, setReviewLogs] = useState<ReviewLog[]>([]);
   const [reviewError, setReviewError] = useState("");
@@ -285,7 +298,11 @@ export default function App() {
 
     let cancelled = false;
     setSummaryError("");
-    const summaryUrl = activePage === "Reports" && reportMonth ? `${API_BASE_URL}/dashboard/summary?month=${encodeURIComponent(reportMonth)}` : `${API_BASE_URL}/dashboard/summary`;
+    const reportParameters = new URLSearchParams();
+    if (activePage === "Reports" && reportMonth) reportParameters.set("month", reportMonth);
+    if (activePage === "Reports" && reportDateFrom) reportParameters.set("date_from", reportDateFrom);
+    if (activePage === "Reports" && reportDateTo) reportParameters.set("date_to", reportDateTo);
+    const summaryUrl = reportParameters.size ? `${API_BASE_URL}/dashboard/summary?${reportParameters}` : `${API_BASE_URL}/dashboard/summary`;
     fetch(summaryUrl)
       .then(async (response) => {
         const result = await response.json();
@@ -295,7 +312,7 @@ export default function App() {
       .catch((error: Error) => !cancelled && setSummaryError(error.message));
 
     return () => { cancelled = true; };
-  }, [activePage, reportMonth]);
+  }, [activePage, reportMonth, reportDateFrom, reportDateTo]);
 
   useEffect(() => {
     if (activePage !== "Dashboard") return;
@@ -335,6 +352,11 @@ export default function App() {
 
   useEffect(() => {
     if (activePage !== "Dashboard" && activePage !== "Reports") return;
+    if (activePage === "Reports" && (reportDateFrom || reportDateTo)) {
+      setCurrentBudget(null);
+      setBudgetError("");
+      return;
+    }
 
     const budgetUrl = activePage === "Reports" && reportMonth ? `${API_BASE_URL}/budgets/${encodeURIComponent(reportMonth)}` : `${API_BASE_URL}/budgets/current`;
     fetch(budgetUrl)
@@ -345,7 +367,7 @@ export default function App() {
         setMonthlyBudgetInput(result.overall ? String(result.overall.limit) : "");
       })
       .catch((error: Error) => setBudgetError(error.message));
-  }, [activePage, reportMonth]);
+  }, [activePage, reportMonth, reportDateFrom, reportDateTo]);
 
   useEffect(() => {
     if (activePage !== "Dashboard") return;
@@ -850,34 +872,7 @@ export default function App() {
           <div className="insight-pill"><span aria-hidden="true">✦</span> AI-ready</div>
         </section>
 
-        <section className="metric-card" aria-labelledby="gmail-sync-title" style={{ marginTop: 24 }}>
-          <p className="eyebrow">Email ingestion</p>
-          <h2 id="gmail-sync-title">Sync Gmail transactions</h2>
-          <p style={{ marginTop: 10 }}>{gmailConnectionMessage || "Checking Gmail connection..."}</p>
-          {gmailConnected === false && <button className="theme-toggle" onClick={() => window.location.assign(`${API_BASE_URL}/auth/google`)} style={{ marginTop: 18 }} type="button">Connect Gmail</button>}
-          {gmailConnected && <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
-            <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={syncGmail} type="button">{syncingGmail ? "Syncing..." : "Sync Gmail"}</button>
-            <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={disconnectGmail} type="button">{disconnectingGmail ? "Disconnecting..." : "Disconnect Gmail"}</button>
-          </div>}
-          {syncStatus && <p role="status" style={{ marginTop: 16 }}>{syncStatus}</p>}
-        </section>
-
-        <section className="metric-card" aria-labelledby="gmail-logs-title" style={{ marginTop: 24 }}>
-          <p className="eyebrow">Sync activity</p>
-          <h2 id="gmail-logs-title">Gmail processing logs</h2>
-          {gmailLogsError && <p role="alert">{gmailLogsError}</p>}
-          {!gmailLogsError && gmailLogs.length === 0 && <p>No Gmail processing logs yet.</p>}
-          <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
-            {gmailLogs.map((log) => (
-              <article key={log._id} style={{ padding: 14, border: "1px solid #e0e7f1", borderRadius: 12 }}>
-                <strong style={{ display: "inline", margin: 0, fontSize: "inherit" }}>{log.subject || "No subject"}</strong>
-                <p style={{ marginTop: 6 }}>{formatGmailStatus(log.status)}{log.reason || log.error ? ` · ${log.reason || log.error}` : ""}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="placeholder-grid" aria-label="Dashboard preview">
+        <section className="placeholder-grid kpi-grid" aria-label="Financial overview">
           {[
             ["Income", summary ? formatCurrency(summary.total_income ?? summary.total_credit) : "Loading..."],
             ["Expenses", summary ? formatCurrency(summary.total_expenses ?? summary.total_spend) : "Loading..."],
@@ -888,10 +883,65 @@ export default function App() {
             ["Transactions", summary ? String(summary.total_transactions) : "Loading..."],
             ["Pending review", summary ? String(summary.review_required_count + summary.review_log_count) : "Loading..."],
           ].map(([label, value]) => (
-            <article className="metric-card" key={label}>
-              <p>{label}</p><strong>{value}</strong>
+            <article className={`metric-card kpi-card kpi-${label.toLowerCase().replaceAll(" ", "-")}`} key={label}>
+              <div className="kpi-heading"><span className="kpi-icon" aria-hidden="true">{kpiIcons[label]}</span><p>{label}</p></div><strong>{value}</strong>
+              <span className="kpi-caption">Current recorded total</span>
             </article>
           ))}
+        </section>
+
+        <details className="metric-card expandable-card" style={{ marginTop: 24 }}>
+          <summary><span><span className="eyebrow">Email ingestion</span><strong id="gmail-sync-title">Gmail transaction sync</strong></span><span className="details-count">{gmailConnected ? "On" : "Off"}</span></summary>
+          <div className="expandable-content">
+            <p>{gmailConnectionMessage || "Checking Gmail connection..."}</p>
+            {gmailConnected === false && <button className="theme-toggle" onClick={() => window.location.assign(`${API_BASE_URL}/auth/google`)} style={{ marginTop: 18 }} type="button">Connect Gmail</button>}
+            {gmailConnected && <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
+              <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={syncGmail} type="button">{syncingGmail ? "Syncing..." : "Sync Gmail"}</button>
+              <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={disconnectGmail} type="button">{disconnectingGmail ? "Disconnecting..." : "Disconnect Gmail"}</button>
+            </div>}
+            {syncStatus && <p role="status" style={{ marginTop: 16 }}>{syncStatus}</p>}
+          </div>
+        </details>
+
+        <details className="metric-card expandable-card" style={{ marginTop: 24 }}>
+          <summary><span><span className="eyebrow">Sync activity</span><strong id="gmail-logs-title">Gmail processing logs</strong></span><span className="details-count">{gmailLogs.length}</span></summary>
+          <div className="expandable-content">
+            {gmailLogsError && <p role="alert">{gmailLogsError}</p>}
+            {!gmailLogsError && gmailLogs.length === 0 && <p>No Gmail processing logs yet.</p>}
+            <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
+              {gmailLogs.map((log) => (
+                <article className="timeline-item" key={log._id}>
+                  <strong style={{ display: "inline", margin: 0, fontSize: "inherit" }}>{log.subject || "No subject"}</strong>
+                  <p style={{ marginTop: 6 }}>{formatGmailStatus(log.status)}{log.reason || log.error ? ` · ${log.reason || log.error}` : ""}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </details>
+
+        <section className="analytics-grid" aria-label="Interactive financial analytics">
+          <article className="metric-card chart-card" aria-labelledby="cashflow-chart-title">
+            <div className="card-title-row"><div><p className="eyebrow">Cash flow</p><h2 id="cashflow-chart-title">Monthly spending trend</h2></div><span className="chart-legend"><i className="legend-dot" /> Expenses</span></div>
+            {!summary && <div className="chart-empty">Loading chart data…</div>}
+            {summary && summary.monthly_trend.length === 0 && <div className="chart-empty">No spending trend available yet.</div>}
+            {summary && summary.monthly_trend.length > 0 && <div className="bar-chart" role="img" aria-label="Monthly spending bar chart">
+              {summary.monthly_trend.map((item) => <button className="chart-column" key={item.month} onClick={() => { setReportMonth(item.month); setActivePage("Reports"); }} title={`${item.month}: ${formatCurrency(item.amount)}`} type="button">
+                <span className="chart-bar" style={{ height: `${Math.max(8, (item.amount / maxMonthlySpend) * 100)}%` }} />
+                <span className="chart-value">{formatCurrency(item.amount)}</span><span className="chart-label">{item.month.slice(5)}</span>
+              </button>)}
+            </div>}
+            <p className="chart-hint">Select a month to open its full report.</p>
+          </article>
+          <article className="metric-card chart-card" aria-labelledby="category-chart-title">
+            <div className="card-title-row"><div><p className="eyebrow">Distribution</p><h2 id="category-chart-title">Top expense categories</h2></div><span className="chart-legend"><i className="legend-dot legend-dot-alt" /> Share of spend</span></div>
+            {summary && categoryEntries.length === 0 && <div className="chart-empty">No category data available yet.</div>}
+            <div className="category-chart">
+              {categoryEntries.slice(0, 5).map(([category, amount], index) => <button className="category-row" key={category} onClick={() => { setTransactionCategory(category); setTransactionsPage(0); setActivePage("Transactions"); }} title={`View ${category} transactions`} type="button">
+                <span className={`category-swatch category-swatch-${index}`} /><span className="category-name">{category}</span><span className="category-rail"><span style={{ width: `${(amount / maxCategorySpend) * 100}%` }} /></span><strong>{formatCurrency(amount)}</strong>
+              </button>)}
+            </div>
+            <p className="chart-hint">Select a category to inspect its transactions.</p>
+          </article>
         </section>
 
         <section className="metric-card" aria-labelledby="budget-title" style={{ marginTop: 24 }}>
@@ -980,36 +1030,31 @@ export default function App() {
           </div>}
         </section>
 
-        <section className="metric-card" aria-labelledby="top-merchants-title" style={{ marginTop: 24 }}>
-          <p className="eyebrow">Spending patterns</p>
-          <h2 id="top-merchants-title">Top merchants</h2>
-          {!summary && <p>Loading merchants...</p>}
-          {summary?.top_merchants.length === 0 && <p>No merchant data yet.</p>}
-          <ol style={{ margin: "20px 0 0", paddingLeft: 22, display: "grid", gap: 10 }}>
-            {summary?.top_merchants.slice(0, 5).map((merchant) => (
-              <li key={merchant.merchant} style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-                <span>{merchant.merchant}</span>
-                <strong>{formatCurrency(merchant.amount)}</strong>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section className="metric-card" aria-labelledby="category-title" style={{ marginTop: 24 }}>
-          <p className="eyebrow">Where your money goes</p>
-          <h2 id="category-title">Spend by category</h2>
-          {!summary && <p>Loading categories...</p>}
-          {summary && Object.keys(summary.category_summary).length === 0 && <p>No category data yet.</p>}
-          <ol style={{ margin: "20px 0 0", paddingLeft: 22, display: "grid", gap: 10 }}>
-            {summary && Object.entries(summary.category_summary)
-              .sort(([, firstAmount], [, secondAmount]) => secondAmount - firstAmount)
-              .map(([category, amount]) => (
-                <li key={category} style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-                  <span>{category}</span>
-                  <strong>{formatCurrency(amount)}</strong>
-                </li>
-              ))}
-          </ol>
+        <section className="dashboard-detail-grid" aria-label="Detailed spending analysis">
+          <details className="metric-card expandable-card">
+            <summary><span><span className="eyebrow">Spending patterns</span><strong id="top-merchants-title">Top merchants</strong></span><span className="details-count">{summary?.top_merchants.length ?? 0}</span></summary>
+            <div className="expandable-content">
+              {!summary && <p>Loading merchants...</p>}
+              {summary?.top_merchants.length === 0 && <p>No merchant data yet.</p>}
+              <ol className="ranked-list">
+                {summary?.top_merchants.slice(0, 5).map((merchant) => (
+                  <li key={merchant.merchant}><span>{merchant.merchant}</span><strong>{formatCurrency(merchant.amount)}</strong></li>
+                ))}
+              </ol>
+            </div>
+          </details>
+          <details className="metric-card expandable-card">
+            <summary><span><span className="eyebrow">Where your money goes</span><strong id="category-title">Spend by category</strong></span><span className="details-count">{categoryEntries.length}</span></summary>
+            <div className="expandable-content">
+              {!summary && <p>Loading categories...</p>}
+              {summary && Object.keys(summary.category_summary).length === 0 && <p>No category data yet.</p>}
+              <ol className="ranked-list">
+                {categoryEntries.map(([category, amount]) => (
+                  <li key={category}><span>{category}</span><strong>{formatCurrency(amount)}</strong></li>
+                ))}
+              </ol>
+            </div>
+          </details>
         </section>
 
         <section className="metric-card" aria-labelledby="review-title" style={{ marginTop: 24 }}>
@@ -1155,10 +1200,9 @@ export default function App() {
         </>}
 
         {activePage === "Transactions" && (
-          <section className="metric-card" aria-labelledby="transactions-title">
-            <p className="eyebrow">Review history and records</p>
-            <h2 id="transactions-title">Transactions</h2>
-            <form onSubmit={addTransaction} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 24 }}>
+          <section className="metric-card workspace-card" aria-labelledby="transactions-title">
+            <div className="workspace-heading"><div><p className="eyebrow">Review history and records</p><h2 id="transactions-title">Transactions ledger</h2><p>Capture, filter, and review every financial movement in one place.</p></div><span className="workspace-stat">{transactions.length} loaded</span></div>
+            <form className="data-entry-form" onSubmit={addTransaction}>
               <label>Date<input required type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} /></label>
               <label>Merchant<input required value={newMerchant} onChange={(event) => setNewMerchant(event.target.value)} /></label>
               <label>Amount<input required min="0.01" step="0.01" type="number" value={newAmount} onChange={(event) => setNewAmount(event.target.value)} /></label>
@@ -1167,7 +1211,7 @@ export default function App() {
               <div style={{ alignSelf: "end" }}><button className="theme-toggle" disabled={addingTransaction} type="submit">{addingTransaction ? "Adding..." : "Add transaction"}</button></div>
             </form>
             {transactionMessage && <p role="status">{transactionMessage}</p>}
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: 12, marginTop: 20 }}>
+            <div className="filter-toolbar">
               <label style={{ display: "grid", gap: 6, flex: "1 1 220px" }}>
                 Search transactions
                 <input placeholder="Merchant or category" value={transactionSearch} onChange={(event) => setTransactionSearch(event.target.value)} />
@@ -1218,13 +1262,13 @@ export default function App() {
                   <option value="amount_low">Amount: low to high</option>
                 </select>
               </label>
-              <button className="theme-toggle" onClick={() => { setTransactionSearch(""); setTransactionStatus(""); setTransactionTypeFilter(""); setTransactionDateFrom(""); setTransactionDateTo(""); setTransactionCategory(""); setTransactionSort("newest"); setTransactionsPage(0); }} type="button">Clear</button>
+              <button className="theme-toggle filter-clear" onClick={() => { setTransactionSearch(""); setTransactionStatus(""); setTransactionTypeFilter(""); setTransactionDateFrom(""); setTransactionDateTo(""); setTransactionCategory(""); setTransactionSort("newest"); setTransactionsPage(0); }} type="button">Clear filters</button>
             </div>
             {transactionsError && <p role="alert">{transactionsError}</p>}
-            {!transactionsError && <p style={{ marginTop: 16 }}>{visibleTransactions.length} transaction{visibleTransactions.length === 1 ? "" : "s"} on this page · {formatCurrency(visibleTransactionTotal)}</p>}
+            {!transactionsError && <div className="ledger-summary"><span>{visibleTransactions.length} transaction{visibleTransactions.length === 1 ? "" : "s"} on this page</span><strong>{formatCurrency(visibleTransactionTotal)}</strong></div>}
             {!transactionsError && visibleTransactions.length === 0 && <p>No transactions found for this search or filter.</p>}
-            <div style={{ overflowX: "auto", marginTop: 20 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
+            <div className="ledger-table-wrap">
+              <table className="ledger-table">
                 <thead><tr><th>Date</th><th>Merchant</th><th>Amount</th><th>Category</th><th>Type</th><th>Status</th><th>Review history</th></tr></thead>
                 <tbody>{visibleTransactions.map((transaction) => {
                   const status = transaction.status || "confirmed";
@@ -1237,7 +1281,7 @@ export default function App() {
                 })}</tbody>
               </table>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 20 }}>
+            <div className="pager">
               <button className="theme-toggle" disabled={transactionsPage === 0} onClick={() => setTransactionsPage((page) => page - 1)} type="button">Previous</button>
               <span>Page {transactionsPage + 1}</span>
               <button className="theme-toggle" disabled={transactions.length < TRANSACTIONS_PAGE_SIZE} onClick={() => setTransactionsPage((page) => page + 1)} type="button">Next</button>
@@ -1252,10 +1296,12 @@ export default function App() {
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: 12, marginTop: 18 }}>
               <label style={{ display: "grid", gap: 6 }}>
                 Report month
-                <input type="month" value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} />
+                <input type="month" value={reportMonth} onChange={(event) => { setReportMonth(event.target.value); setReportDateFrom(""); setReportDateTo(""); }} />
               </label>
-              <button className="theme-toggle" disabled={!reportMonth} onClick={() => setReportMonth("")} type="button">All time</button>
-              <span className="insight-helper">{reportMonth ? `Showing ${reportMonth}` : "Showing all recorded transactions"}</span>
+              <label style={{ display: "grid", gap: 6 }}>From date<input type="date" value={reportDateFrom} onChange={(event) => { setReportDateFrom(event.target.value); setReportMonth(""); }} /></label>
+              <label style={{ display: "grid", gap: 6 }}>To date<input type="date" value={reportDateTo} onChange={(event) => { setReportDateTo(event.target.value); setReportMonth(""); }} /></label>
+              <button className="theme-toggle" disabled={!reportMonth && !reportDateFrom && !reportDateTo} onClick={() => { setReportMonth(""); setReportDateFrom(""); setReportDateTo(""); }} type="button">All time</button>
+              <span className="insight-helper">{reportMonth ? `Showing ${reportMonth}` : reportDateFrom || reportDateTo ? `Showing ${reportDateFrom || "earliest"} to ${reportDateTo || "latest"}` : "Showing all recorded transactions"}</span>
             </div>
             {summaryError && <p role="alert">{summaryError}</p>}
             {!summary && !summaryError && <p>Loading report...</p>}
@@ -1277,7 +1323,8 @@ export default function App() {
           <section className="metric-card" aria-labelledby="report-budget-title" style={{ marginTop: 24 }}>
             <p className="eyebrow">Monthly planning</p>
             <h2 id="report-budget-title">Budget performance</h2>
-            {budgetError && <p role="alert">{budgetError}</p>}
+            {(reportDateFrom || reportDateTo) && <p>Budget performance is available for a selected month, not a custom date range.</p>}
+            {!reportDateFrom && !reportDateTo && <>{budgetError && <p role="alert">{budgetError}</p>}
             {!budgetError && !currentBudget && <p>Loading budget performance...</p>}
             {currentBudget && !currentBudget.overall && <p>No overall monthly budget is set. Add one from Dashboard to track progress here.</p>}
             {currentBudget?.overall && <div style={{ display: "grid", gap: 14, marginTop: 20 }}>
@@ -1289,7 +1336,7 @@ export default function App() {
                 <div className="budget-progress" style={{ marginTop: 10 }}><span className={item.percent_used >= 100 ? "budget-danger" : item.percent_used >= 80 ? "budget-warning" : "budget-healthy"} style={{ width: `${Math.min(item.percent_used, 100)}%` }} /></div>
                 <p className={item.percent_used >= 100 ? "budget-danger-text" : item.percent_used >= 80 ? "budget-warning-text" : "budget-healthy-text"} style={{ marginTop: 8 }}>{item.percent_used}% used · {item.percent_used >= 100 ? `exceeded by ${formatCurrency(Math.abs(item.remaining))}` : `${formatCurrency(item.remaining)} remains`}</p>
               </article>)}
-            </div>}
+            </div>}</>}
           </section>
 
           <section className="metric-card" aria-labelledby="trend-title" style={{ marginTop: 24 }}>

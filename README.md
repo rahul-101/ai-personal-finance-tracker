@@ -1,104 +1,127 @@
-# AI Personal Finance Tracker
+# FinSight — AI Personal Finance Tracker
 
-A learning project that imports personal-finance data from manual entry, Gmail transaction alerts, receipt OCR, and bill uploads. The backend uses FastAPI and MongoDB; the frontend is a small static dashboard.
+FinSight is a private, single-user personal-finance workspace. It collects transactions from manual entry, Gmail alerts, receipt OCR, and bill uploads; classifies them with configurable AI providers; and presents financial summaries, budgets, reports, and review workflows.
+
+This repository is intentionally designed to be understandable by a human developer and usable as context for another AI coding assistant.
+
+## Documentation map
+
+- [Product requirements](docs/PRD.md)
+- [Technical requirements](docs/TRD.md)
+- [Application flow](docs/APP_FLOW.md)
+- [UI/UX brief](docs/UI_UX_BRIEF.md)
+- [Backend schema](docs/BACKEND_SCHEMA.md)
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 
 ## Current capabilities
 
-- Manual transaction creation and paginated transaction listing
-- Gmail OAuth token storage with Fernet encryption and transaction-email parsing
-- Receipt and bill OCR with optional AI-provider enrichment
-- Dashboard summaries plus CSV and JSON exports
+- Manual transactions with status, financial type, date-range, category, and search filters.
+- Financial types: income, expense, investment, transfer, refund, plus legacy debit/credit.
+- Gmail OAuth connection, manual sync, optional local daily/weekly scheduled sync, and sync history.
+- Gmail low-confidence review: approve/add, edit/add, or ignore an email before it affects records.
+- Receipt and bill image uploads, OCR, optional AI enrichment, bill history, and unpaid bill tracking.
+- Transaction review workflow: `review_required` → `confirmed` or `rejected`.
+- Dashboard KPIs, interactive HTML/CSS charts, budgets, reports, AI insights, exports, and profile preferences.
+- Provider-neutral AI support for Gemini, OpenAI, Anthropic, Groq, Mistral, DeepSeek, xAI, and Together AI. Ollama is intentionally not included.
+- React/Vite premium dashboard with dark mode and responsive layouts.
+
+## Repository layout
+
+```text
+backend/             FastAPI app, MongoDB access, models, routes, services, tests
+frontend-react/      Primary React/Vite frontend
+frontend/            Legacy static frontend retained for reference
+docs/                Product and technical context for humans and AI assistants
+```
 
 ## Local setup
 
-1. Install Python 3.11+ and the [Tesseract OCR](https://tesseract-ocr.github.io/tessdoc/Installation.html) executable.
-2. Create and activate a virtual environment inside `backend/`.
-3. Install dependencies with `pip install -r requirements.txt`.
-4. Copy `backend/.env.example` to `backend/.env`, then set the required secrets.
-5. Start the API from `backend/`:
+### Backend
 
-   ```bash
-   uvicorn main:app --reload
-   ```
+Requirements: Python 3.11+, MongoDB Atlas or local MongoDB, and Tesseract OCR for image extraction.
 
-6. Serve `frontend/` with a local static server, for example:
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn main:app --reload
+```
 
-   ```bash
-   python -m http.server 3000 --directory frontend
-   ```
+API: `http://127.0.0.1:8000`
+Interactive API docs: `http://127.0.0.1:8000/docs`
 
-Open `http://127.0.0.1:3000`. FastAPI documentation is at `http://127.0.0.1:8000/docs`.
+### Frontend
 
-## Architecture
+```bash
+cd frontend-react
+npm install
+npm run dev
+```
 
-- `backend/routes/`: HTTP endpoints
-- `backend/services/`: email parsing, OCR, and AI-provider integration
-- `backend/services/ai_client.py`: provider-neutral AI adapter selected by environment configuration
-- `backend/models.py`: request validation contracts
-- `backend/database.py`: MongoDB collections and indexes
-- `frontend/`: static dashboard
+Open `http://localhost:3000`.
+
+Build the frontend with:
+
+```bash
+npm run build
+```
+
+## Environment configuration
+
+Copy `backend/.env.example` to `backend/.env`. Required configuration includes:
+
+```env
+MONGO_URI=...
+DATABASE_NAME=finance_tracker
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
+FERNET_KEY=...
+
+AI_PROVIDER=gemini
+AI_MODEL=gemini-2.5-flash
+AI_API_KEY=...
+```
+
+`AI_API_KEY` can be replaced with a matching provider-specific variable such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GROQ_API_KEY`. Never commit `.env`, OAuth secrets, tokens, or personal finance data.
 
 ## Development checks
 
-From `backend/`:
+Backend tests:
 
 ```bash
+cd backend
+source venv/bin/activate
 python -m unittest discover -s tests -v
-python -m py_compile $(find . -path './venv' -prune -o -name '*.py' -print)
 ```
 
-## AI provider configuration
+The current suite covers provider adapters, financial summaries, budgets, review workflows, Gmail status/scheduling/log review, validation, and upload validation.
 
-AI-backed email classification and receipt/bill extraction share one provider-neutral
-client. The application owns the prompts, fallback behavior, and validation; the
-configured provider only generates a response. Gemini remains the default for
-backward compatibility.
+## Architecture summary
 
-Set these values in `backend/.env`:
-
-```env
-AI_PROVIDER=gemini
-AI_MODEL=gemini-2.5-flash
-AI_API_KEY=your-provider-key
-AI_BASE_URL=
+```text
+React/Vite UI
+    ↓ HTTP
+FastAPI routes → Pydantic validation → services → MongoDB
+                               ↘ AI provider adapter
+                                ↘ Gmail / OCR integrations
 ```
 
-Supported cloud providers are `gemini`, `openai`, `anthropic`, `groq`,
-`mistral`, `deepseek`, `xai`, and `together`. Gemini and Anthropic use their
-dedicated SDKs. OpenAI, Groq, Mistral, DeepSeek, xAI, and Together AI use the
-shared OpenAI-compatible adapter.
+The frontend must not call AI providers, MongoDB, or Gmail directly. The backend validates all incoming data and treats AI output as untrusted before persistence.
 
-Use the same three variables for every provider. Set `AI_MODEL` to a model ID
-available in the selected provider account:
+## Known constraints
 
-```env
-# Gemini
-AI_PROVIDER=gemini
-AI_MODEL=gemini-2.5-flash
-AI_API_KEY=your-gemini-key
+- This is a single-user local application, not a multi-user SaaS.
+- The automatic Gmail scheduler is in-process and runs only while the FastAPI server is running. It is suitable for local use, not multi-worker production deployment.
+- `frontend-react/src/App.tsx` is currently a large composition file. Future refactoring should split it into pages/components without altering APIs.
 
-# OpenAI-compatible example: Groq
-AI_PROVIDER=groq
-AI_MODEL=your-groq-model-id
-AI_API_KEY=your-groq-key
+## Guidance for another AI assistant
 
-# Anthropic
-AI_PROVIDER=anthropic
-AI_MODEL=your-anthropic-model-id
-AI_API_KEY=your-anthropic-key
-```
-
-`AI_API_KEY` can be replaced by the provider-specific environment variable,
-such as `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, or
-`TOGETHER_API_KEY`. Install `openai` for OpenAI-compatible providers and
-`anthropic` for Anthropic before selecting them. Existing `GEMINI_API_KEY` and
-`GEMINI_MODEL` settings continue to work during migration.
-
-The dashboard Settings panel reads `GET /ai/configuration` and can run a small
-provider health check through `POST /ai/test`. Neither endpoint returns API keys.
-
-## Security notes
-
-- Never commit `.env`, OAuth credentials, or real finance data.
-- The current Gmail implementation is for one local learning user. Before deployment, add user authentication, OAuth state validation, and secure HTTPS-only configuration.
-- AI-provider output must be treated as untrusted data and validated before storage.
+1. Read `README.md` and the relevant file in `docs/` before proposing changes.
+2. Preserve the current REST routes and model validation unless a migration is explicitly planned.
+3. Prefer small, testable steps. Add backend tests for route/service changes.
+4. Do not add Ollama support unless the user explicitly changes the project decision.
+5. Do not store secrets, raw card numbers, PINs, bank credentials, or unmasked sensitive email content.
+6. Treat any AI response as untrusted; validate it with the established Pydantic/domain flow.
