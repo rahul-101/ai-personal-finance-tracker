@@ -1,6 +1,8 @@
 import unittest
+from datetime import date
 from unittest.mock import Mock, patch
 
+from fastapi import HTTPException
 from models import Transaction
 from routes.dashboard import dashboard_summary
 
@@ -60,3 +62,30 @@ class FinancialSummaryTests(unittest.TestCase):
         self.assertEqual(result["selected_month"], "2026-07")
         self.assertEqual(result["total_expenses"], 100)
         self.assertEqual(result["total_transactions"], 1)
+
+    def test_dashboard_can_filter_the_summary_to_an_inclusive_date_range(self):
+        transactions = Mock()
+        transactions.find.return_value = [
+            {"amount": 100, "merchant": "Start", "category": "Food", "transaction_type": "expense", "status": "confirmed", "date": "2026-07-01", "source": "manual"},
+            {"amount": 200, "merchant": "Middle", "category": "Food", "transaction_type": "expense", "status": "confirmed", "date": "2026-07-15", "source": "manual"},
+            {"amount": 300, "merchant": "End", "category": "Food", "transaction_type": "expense", "status": "confirmed", "date": "2026-08-01", "source": "manual"},
+        ]
+        gmail_logs = Mock()
+        gmail_logs.count_documents.return_value = 0
+        bills = Mock()
+        bills.count_documents.return_value = 0
+
+        with patch("routes.dashboard.transactions_collection", transactions), \
+             patch("routes.dashboard.gmail_logs_collection", gmail_logs), \
+             patch("routes.dashboard.bills_collection", bills):
+            result = dashboard_summary(date_from=date(2026, 7, 1), date_to=date(2026, 7, 31))["summary"]
+
+        self.assertEqual(result["total_expenses"], 300)
+        self.assertEqual(result["total_transactions"], 2)
+        self.assertEqual(result["selected_date_from"], "2026-07-01")
+
+    def test_dashboard_rejects_an_inverted_date_range(self):
+        with self.assertRaises(HTTPException) as raised:
+            dashboard_summary(date_from=date(2026, 8, 1), date_to=date(2026, 7, 1))
+
+        self.assertEqual(raised.exception.status_code, 422)

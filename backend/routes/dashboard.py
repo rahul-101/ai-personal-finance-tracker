@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
-from datetime import datetime
+from datetime import date as Date, datetime
 
 from database import transactions_collection
 from database import gmail_logs_collection
@@ -46,6 +46,21 @@ def get_month_from_transaction(transaction):
     return "Unknown"
 
 
+def get_date_from_transaction(transaction) -> Date | None:
+    value = transaction.get("date")
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, Date):
+        return value
+    if isinstance(value, str):
+        try:
+            return Date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    created_at = transaction.get("created_at")
+    return created_at.date() if isinstance(created_at, datetime) else None
+
+
 def classify_financial_type(transaction_type: str) -> str:
     """Map legacy values into the richer single-user finance classifications."""
     return {
@@ -62,14 +77,25 @@ def classify_financial_type(transaction_type: str) -> str:
 
 
 @router.get("/dashboard/summary")
-def dashboard_summary(month: str | None = None):
+def dashboard_summary(month: str | None = None, date_from: Date | None = None, date_to: Date | None = None):
     if month and not re.fullmatch(r"\d{4}-\d{2}", month):
         raise HTTPException(status_code=422, detail="month must use YYYY-MM format")
+    if month and (date_from or date_to):
+        raise HTTPException(status_code=422, detail="Use either month or a date range, not both")
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must be on or before date_to")
 
     try:
         transactions = list(transactions_collection.find())
         if month:
             transactions = [transaction for transaction in transactions if get_month_from_transaction(transaction) == month]
+        elif date_from or date_to:
+            transactions = [
+                transaction for transaction in transactions
+                if (transaction_date := get_date_from_transaction(transaction))
+                and (not date_from or transaction_date >= date_from)
+                and (not date_to or transaction_date <= date_to)
+            ]
 
         total_expenses = 0
         total_income = 0
@@ -181,6 +207,8 @@ def dashboard_summary(month: str | None = None):
                 "net_cash_flow": round(total_income + total_refunds - total_expenses - total_investments, 2),
                 "total_transactions": total_transactions,
                 "selected_month": month,
+                "selected_date_from": date_from.isoformat() if date_from else None,
+                "selected_date_to": date_to.isoformat() if date_to else None,
                 "review_required_count": review_required_count,
                 "ignored_email_count": ignored_email_count,
                 "review_log_count": review_log_count,
@@ -192,6 +220,8 @@ def dashboard_summary(month: str | None = None):
             }
         }
 
+    except HTTPException:
+        raise
     except Exception as error:
         raise HTTPException(
             status_code=500,
