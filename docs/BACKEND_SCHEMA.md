@@ -75,5 +75,5 @@ One single-user preference document: display name, optional email, currency, tim
 | Gmail | `/auth/google`, `/gmail/status`, `/gmail/sync`, `/gmail-review-logs/{id}` |
 | Dashboard | `/dashboard/summary`, `/dashboard/review-required`, `/dashboard/gmail-sync-runs` |
 | Budget/Profile | `/budgets/current`, `/budgets/{month}`, `/profile` |
-| AI | `/ai/configuration`, `/ai/test`, `/ai/insights` |
+| AI | `/ai/configuration`, `/ai/test`, `/ai/insights`, `/ai/weekly-digest` |
 | Uploads/Export | `/receipts/upload`, `/bills/upload`, `/export/csv`, `/export/json` |

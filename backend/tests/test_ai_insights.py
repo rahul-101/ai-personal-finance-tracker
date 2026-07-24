@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from routes.ai_settings import generate_finance_insights, get_finance_insight_history
+from routes.ai_settings import generate_finance_insights, generate_weekly_digest, get_finance_insight_history
+from services.ai_client import AIProviderError
 
 
 class AIInsightsRouteTests(unittest.TestCase):
@@ -106,3 +107,46 @@ class AIInsightsRouteTests(unittest.TestCase):
 
         self.assertEqual(result["insights"][0]["_id"], "insight-1")
         self.assertEqual(result["insights"][0]["headline"], "Overview")
+
+    def test_generates_a_weekly_digest_for_a_seven_day_range(self):
+        dashboard_result = {"status": "success", "summary": {
+            "total_spend": 900, "total_credit": 1500, "net_balance": 600,
+            "total_income": 1500, "total_expenses": 900, "total_refunds": 0,
+            "total_investments": 0, "total_transfers": 0, "net_cash_flow": 600,
+            "total_transactions": 3, "category_summary": {"Food": 900},
+            "top_merchants": [{"merchant": "Cafe", "amount": 500}],
+        }}
+        response = '{"headline":"A steady week","insights":["Keep an eye on food spending"],"disclaimer":"Educational only."}'
+
+        with patch("routes.ai_settings.is_ai_configured", return_value=True), \
+             patch("routes.ai_settings.get_ai_configuration", return_value=SimpleNamespace(provider="gemini", model="test-model")), \
+             patch("routes.ai_settings.dashboard_summary", return_value=dashboard_result) as summary, \
+             patch("routes.ai_settings.get_profile_ai_preferences", return_value={}), \
+             patch("routes.ai_settings.generate_text", return_value=response), \
+             patch("routes.ai_settings.ai_insights_collection.insert_one") as insert_one:
+            result = generate_weekly_digest()
+
+        self.assertEqual(result["insight"]["headline"], "A steady week")
+        self.assertIn("date_from", summary.call_args.kwargs)
+        self.assertEqual(insert_one.call_args.args[0]["kind"], "weekly_digest")
+
+    def test_weekly_digest_uses_local_guidance_when_provider_is_unavailable(self):
+        dashboard_result = {"status": "success", "summary": {
+            "total_spend": 900, "total_credit": 1500, "net_balance": 600,
+            "total_income": 1500, "total_expenses": 900, "total_refunds": 0,
+            "total_investments": 0, "total_transfers": 0, "net_cash_flow": 600,
+            "total_transactions": 3, "category_summary": {"Food": 900},
+            "top_merchants": [{"merchant": "Cafe", "amount": 500}],
+        }}
+
+        with patch("routes.ai_settings.is_ai_configured", return_value=True), \
+             patch("routes.ai_settings.get_ai_configuration", return_value=SimpleNamespace(provider="gemini", model="test-model")), \
+             patch("routes.ai_settings.dashboard_summary", return_value=dashboard_result), \
+             patch("routes.ai_settings.get_profile_ai_preferences", return_value={}), \
+             patch("routes.ai_settings.generate_text", side_effect=AIProviderError("quota unavailable")), \
+             patch("routes.ai_settings.ai_insights_collection.insert_one") as insert_one:
+            result = generate_weekly_digest()
+
+        self.assertEqual(result["source"], "rule_based")
+        self.assertTrue(result["insight"]["insights"])
+        self.assertEqual(insert_one.call_args.args[0]["source"], "rule_based")

@@ -21,7 +21,7 @@ This repository is intentionally designed to be understandable by a human develo
 - Gmail low-confidence review: approve/add, edit/add, or ignore an email before it affects records.
 - Receipt and bill image uploads, OCR, optional AI enrichment, bill history, and unpaid bill tracking.
 - Transaction review workflow: `review_required` → `confirmed` or `rejected`.
-- Dashboard KPIs, interactive HTML/CSS charts, budgets, reports, AI insights, exports, and profile preferences.
+- Dashboard KPIs, financial-health meter, interactive HTML/CSS charts, budgets, reports, weekly AI digest/advice, exports, and profile preferences.
 - Provider-neutral AI support for Gemini, OpenAI, Anthropic, Groq, Mistral, DeepSeek, xAI, and Together AI. Ollama is intentionally not included.
 - React/Vite premium dashboard with dark mode and responsive layouts.
 

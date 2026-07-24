@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 from database import ai_insights_collection, profile_collection
@@ -31,6 +31,29 @@ def get_profile_ai_preferences() -> dict:
         "savings_goal": profile.get("savings_goal"),
         "investment_goal": profile.get("investment_goal"),
         "priorities": profile.get("priorities", []),
+    }
+
+
+def build_rule_based_weekly_digest(summary: dict) -> dict:
+    """Provide useful local guidance when an AI provider is unavailable."""
+    income = float(summary["income"])
+    expenses = float(summary["expenses"])
+    net_cash_flow = float(summary["net_cash_flow"])
+    categories = summary.get("category_summary", {})
+    top_category = max(categories, key=categories.get) if categories else None
+    insights = []
+    if income <= 0 and expenses <= 0:
+        insights.append("No income or expense activity was recorded in the last seven days. Add or sync transactions for a more useful digest.")
+    elif net_cash_flow < 0:
+        insights.append("Recorded outflows exceeded income and refunds this week. Review discretionary spending before the next billing cycle.")
+    else:
+        insights.append("Your recorded cash flow was positive this week. Consider moving part of the surplus toward your savings or investment goal.")
+    if top_category:
+        insights.append(f"{top_category} was the largest recorded expense category this week. Check whether its spending aligns with your plan.")
+    return {
+        "headline": "Your weekly finance snapshot",
+        "insights": insights[:3],
+        "disclaimer": "Educational information based on recorded aggregate data; not financial advice.",
     }
 
 
@@ -189,3 +212,59 @@ def generate_finance_insights():
         "model": configuration.model,
         "insight": insight,
     }
+
+
+@router.post("/ai/weekly-digest")
+def generate_weekly_digest():
+    """Generate concise AI guidance from the most recent seven calendar days."""
+    configuration = get_ai_configuration()
+    if not is_ai_configured():
+        raise HTTPException(status_code=400, detail="The selected AI provider is not configured")
+
+    today = datetime.now(timezone.utc).date()
+    week_start = today - timedelta(days=6)
+    summary_result = dashboard_summary(date_from=week_start, date_to=today)
+    if summary_result.get("status") != "success":
+        raise HTTPException(status_code=500, detail="Unable to load weekly finance data")
+
+    summary = summary_result["summary"]
+    safe_summary = {
+        "period": {"from": week_start.isoformat(), "to": today.isoformat()},
+        "income": summary.get("total_income", summary["total_credit"]),
+        "expenses": summary.get("total_expenses", summary["total_spend"]),
+        "refunds": summary.get("total_refunds", 0),
+        "investments": summary.get("total_investments", 0),
+        "transfers": summary.get("total_transfers", 0),
+        "net_cash_flow": summary.get("net_cash_flow", summary["net_balance"]),
+        "transaction_count": summary["total_transactions"],
+        "category_summary": summary["category_summary"],
+        "top_merchants": summary["top_merchants"][:5],
+        "profile_preferences": get_profile_ai_preferences(),
+    }
+    prompt = (
+        "You are a helpful personal-finance coach. Analyze only this seven-day aggregate data. "
+        "Do not invent facts, make guarantees, give investment advice, or mention specific providers. "
+        "Return exactly valid JSON with this schema: "
+        '{"headline":"short string","insights":["actionable string"],'
+        '"disclaimer":"short educational disclaimer"}. Keep insights to a maximum of three.\n\n'
+        f"Data: {json.dumps(safe_summary)}"
+    )
+    digest_source = "ai"
+    try:
+        response = parse_provider_json(generate_text(prompt))
+        headline = response.get("headline")
+        insights = [item for item in response.get("insights", []) if isinstance(item, str) and item.strip()][:3]
+        disclaimer = response.get("disclaimer")
+        if not isinstance(headline, str) or not insights or not isinstance(disclaimer, str):
+            raise ValueError("The provider returned an unexpected digest format")
+        insight = {"headline": headline.strip(), "insights": insights, "disclaimer": disclaimer.strip()}
+    except (AIProviderError, ValueError, json.JSONDecodeError):
+        digest_source = "rule_based"
+        insight = build_rule_based_weekly_digest(safe_summary)
+    try:
+        ai_insights_collection.insert_one(
+            {**insight, "kind": "weekly_digest", "source": digest_source, "provider": configuration.provider, "model": configuration.model, "created_at": datetime.now(timezone.utc)}
+        )
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Unable to save weekly digest: {error}")
+    return {"status": "success", "provider": configuration.provider, "model": configuration.model, "source": digest_source, "period": safe_summary["period"], "insight": insight}

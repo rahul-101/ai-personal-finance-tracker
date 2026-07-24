@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 
 const navigation = ["Dashboard", "Transactions", "Reports", "Profile", "Settings", "Help"];
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -16,6 +16,30 @@ const gmailStatusLabels: Record<string, string> = {
 
 const formatGmailStatus = (status: string) =>
   gmailStatusLabels[status] ?? `Ignored (${status.replaceAll("_", " ")})`;
+
+const readableReviewDetail = (value?: string) => {
+  if (!value) return "Review the extracted details before adding this record.";
+  const normalized = value.toLowerCase();
+  if (normalized.includes("resource_exhausted") || normalized.includes("quota") || normalized.includes("provider error") || normalized.includes("generation failed")) {
+    return "AI verification is temporarily unavailable. This email is safely held for your confirmation and has not affected your records.";
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object") return String(parsed.reason ?? parsed.message ?? parsed.detail ?? "Review the extracted details before adding this record.");
+  } catch { /* Plain text is already suitable for display. */ }
+  return value.replace(/[{}[]"]/g, " ").replace(/\s+/g, " ").trim();
+};
+
+const greetingForTime = (name: string, timezone: string) => {
+  try {
+    const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: timezone || undefined }).format(new Date()));
+    const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return name ? `${greeting}, ${name}.` : `${greeting}.`;
+  } catch {
+    return name ? `Welcome back, ${name}.` : "Welcome back.";
+  }
+};
 
 const kpiIcons: Record<string, string> = {
   Income: "↗",
@@ -246,6 +270,9 @@ export default function App() {
   const [aiStatus, setAiStatus] = useState("");
   const [testingAI, setTestingAI] = useState(false);
   const [generatedInsight, setGeneratedInsight] = useState<GeneratedInsight | null>(null);
+  const [weeklyDigest, setWeeklyDigest] = useState<GeneratedInsight | null>(null);
+  const [weeklyDigestStatus, setWeeklyDigestStatus] = useState("");
+  const [generatingWeeklyDigest, setGeneratingWeeklyDigest] = useState(false);
   const [aiInsightError, setAiInsightError] = useState("");
   const [generatingInsight, setGeneratingInsight] = useState(false);
   const [insightHistory, setInsightHistory] = useState<InsightHistoryItem[]>([]);
@@ -287,6 +314,36 @@ export default function App() {
   const categoryEntries = Object.entries(summary?.category_summary ?? {}).sort(([, firstAmount], [, secondAmount]) => secondAmount - firstAmount);
   const maxCategorySpend = Math.max(1, ...categoryEntries.map(([, amount]) => amount));
   const topCategory = categoryEntries[0];
+  const chartColors = ["#cc7c31", "#8e7690", "#66816a", "#c66b50", "#decaa0"];
+  const buildDonut = (entries: [string, number][]) => {
+    const total = entries.reduce((sum, [, amount]) => sum + amount, 0);
+    if (!total) return "conic-gradient(#ede7dc 0 360deg)";
+    let cursor = 0;
+    return `conic-gradient(${entries.slice(0, 5).map(([, amount], index) => {
+      const next = cursor + (amount / total) * 360;
+      const stop = `${chartColors[index]} ${cursor}deg ${next}deg`;
+      cursor = next;
+      return stop;
+    }).join(", ")})`;
+  };
+  const categoryDonut = buildDonut(categoryEntries);
+  const merchantEntries: [string, number][] = (summary?.top_merchants ?? []).map((item) => [item.merchant, item.amount]);
+  const merchantDonut = buildDonut(merchantEntries);
+  const financialHealth = (() => {
+    if (!summary) return null;
+    const incomeTarget = Number(profileForm.monthly_income_target);
+    const income = summary.total_income ?? summary.total_credit;
+    const netCashFlow = summary.net_cash_flow ?? summary.net_balance;
+    if (income <= 0 && (!Number.isFinite(incomeTarget) || incomeTarget <= 0)) {
+      return { score: null, label: "Add income data", savingsAmount: netCashFlow };
+    }
+    const baseline = income > 0 ? income : incomeTarget;
+    let score = Math.round((Math.max(0, netCashFlow) / baseline) * 100);
+    if (currentBudget?.overall && currentBudget.overall.percent_used > 100) score -= 15;
+    score -= Math.min(15, (summary.review_required_count + summary.review_log_count) * 3);
+    score = Math.max(0, Math.min(100, score));
+    return { score, label: score >= 60 ? "On track" : score >= 30 ? "Building" : "Needs attention", savingsAmount: netCashFlow };
+  })();
 
   useEffect(() => {
     document.documentElement.dataset.theme = darkMode ? "dark" : "light";
@@ -620,6 +677,23 @@ export default function App() {
     }
   }
 
+  async function generateWeeklyDigest() {
+    setGeneratingWeeklyDigest(true);
+    setWeeklyDigestStatus("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/ai/weekly-digest`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok || result.status !== "success") throw new Error(result.detail || "Unable to generate weekly digest");
+      setWeeklyDigest({ ...result.insight, provider: result.provider, model: result.model });
+      setWeeklyDigestStatus(`Week ${result.period.from} to ${result.period.to}${result.source === "rule_based" ? " · Local guidance (AI provider unavailable)" : ""}`);
+      setInsightHistoryRefresh((value) => value + 1);
+    } catch (error) {
+      setWeeklyDigestStatus(error instanceof Error ? error.message : "Unable to generate weekly digest");
+    } finally {
+      setGeneratingWeeklyDigest(false);
+    }
+  }
+
   async function saveBudgetConfiguration(monthlyLimit: number | null, categoryLimits: Record<string, number>, successMessage: string) {
     setSavingBudget(true);
     setBudgetStatus("");
@@ -866,10 +940,10 @@ export default function App() {
         <section className="welcome-card" aria-labelledby="welcome-title">
           <div>
             <p className="eyebrow">Modern finance, one place</p>
-            <h2 id="welcome-title">{profileForm.display_name ? `Welcome back, ${profileForm.display_name}.` : "Your financial picture, clearly organized."}</h2>
+            <h2 id="welcome-title">{greetingForTime(profileForm.display_name, profileForm.timezone)}</h2>
             <p>{summaryError ? `Dashboard data unavailable: ${summaryError}` : profileForm.savings_goal && Number.isFinite(Number(profileForm.savings_goal)) ? `Your savings goal is ${formatCurrency(Number(profileForm.savings_goal))}.` : "Live data is loaded from your FastAPI backend."}</p>
           </div>
-          <div className="insight-pill"><span aria-hidden="true">✦</span> AI-ready</div>
+          <div className="welcome-side"><div className="insight-pill"><span aria-hidden="true">✦</span> AI-ready</div></div>
         </section>
 
         <section className="placeholder-grid kpi-grid" aria-label="Financial overview">
@@ -890,35 +964,6 @@ export default function App() {
           ))}
         </section>
 
-        <details className="metric-card expandable-card" style={{ marginTop: 24 }}>
-          <summary><span><span className="eyebrow">Email ingestion</span><strong id="gmail-sync-title">Gmail transaction sync</strong></span><span className="details-count">{gmailConnected ? "On" : "Off"}</span></summary>
-          <div className="expandable-content">
-            <p>{gmailConnectionMessage || "Checking Gmail connection..."}</p>
-            {gmailConnected === false && <button className="theme-toggle" onClick={() => window.location.assign(`${API_BASE_URL}/auth/google`)} style={{ marginTop: 18 }} type="button">Connect Gmail</button>}
-            {gmailConnected && <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 18 }}>
-              <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={syncGmail} type="button">{syncingGmail ? "Syncing..." : "Sync Gmail"}</button>
-              <button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={disconnectGmail} type="button">{disconnectingGmail ? "Disconnecting..." : "Disconnect Gmail"}</button>
-            </div>}
-            {syncStatus && <p role="status" style={{ marginTop: 16 }}>{syncStatus}</p>}
-          </div>
-        </details>
-
-        <details className="metric-card expandable-card" style={{ marginTop: 24 }}>
-          <summary><span><span className="eyebrow">Sync activity</span><strong id="gmail-logs-title">Gmail processing logs</strong></span><span className="details-count">{gmailLogs.length}</span></summary>
-          <div className="expandable-content">
-            {gmailLogsError && <p role="alert">{gmailLogsError}</p>}
-            {!gmailLogsError && gmailLogs.length === 0 && <p>No Gmail processing logs yet.</p>}
-            <div style={{ display: "grid", gap: 10, marginTop: 18 }}>
-              {gmailLogs.map((log) => (
-                <article className="timeline-item" key={log._id}>
-                  <strong style={{ display: "inline", margin: 0, fontSize: "inherit" }}>{log.subject || "No subject"}</strong>
-                  <p style={{ marginTop: 6 }}>{formatGmailStatus(log.status)}{log.reason || log.error ? ` · ${log.reason || log.error}` : ""}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </details>
-
         <section className="analytics-grid" aria-label="Interactive financial analytics">
           <article className="metric-card chart-card" aria-labelledby="cashflow-chart-title">
             <div className="card-title-row"><div><p className="eyebrow">Cash flow</p><h2 id="cashflow-chart-title">Monthly spending trend</h2></div><span className="chart-legend"><i className="legend-dot" /> Expenses</span></div>
@@ -935,12 +980,32 @@ export default function App() {
           <article className="metric-card chart-card" aria-labelledby="category-chart-title">
             <div className="card-title-row"><div><p className="eyebrow">Distribution</p><h2 id="category-chart-title">Top expense categories</h2></div><span className="chart-legend"><i className="legend-dot legend-dot-alt" /> Share of spend</span></div>
             {summary && categoryEntries.length === 0 && <div className="chart-empty">No category data available yet.</div>}
-            <div className="category-chart">
+            <div className="donut-chart-layout">
+              <div className="donut-chart" aria-label="Expense category distribution" role="img" style={{ background: categoryDonut } as CSSProperties}><span>{formatCurrency(summary?.total_spend ?? 0)}</span><small>spend</small></div>
+              <div className="category-chart">
               {categoryEntries.slice(0, 5).map(([category, amount], index) => <button className="category-row" key={category} onClick={() => { setTransactionCategory(category); setTransactionsPage(0); setActivePage("Transactions"); }} title={`View ${category} transactions`} type="button">
                 <span className={`category-swatch category-swatch-${index}`} /><span className="category-name">{category}</span><span className="category-rail"><span style={{ width: `${(amount / maxCategorySpend) * 100}%` }} /></span><strong>{formatCurrency(amount)}</strong>
               </button>)}
+              </div>
             </div>
             <p className="chart-hint">Select a category to inspect its transactions.</p>
+          </article>
+        </section>
+
+        <section className="intelligence-grid" aria-label="Weekly insight and financial health">
+          <article className="metric-card weekly-digest-card" aria-labelledby="weekly-digest-title">
+            <div className="card-title-row"><div><p className="eyebrow">Your seven-day snapshot</p><h2 id="weekly-digest-title">Weekly AI insight</h2></div><button className="theme-toggle digest-action" disabled={generatingWeeklyDigest} onClick={generateWeeklyDigest} type="button">{generatingWeeklyDigest ? "Preparing…" : "Generate advice"}</button></div>
+            <p className="digest-copy">Personalized advice from your recorded income, expenses, categories, and cash flow.</p>
+            {weeklyDigestStatus && <p role="status" className="digest-status">{weeklyDigestStatus}</p>}
+            {weeklyDigest && <div className="digest-result" aria-live="polite"><strong>{weeklyDigest.headline}</strong><ul>{weeklyDigest.insights.map((insight, index) => <li key={`${insight}-${index}`}>{insight}</li>)}</ul><p>{weeklyDigest.disclaimer}</p></div>}
+          </article>
+          <article className="metric-card financial-health-card" aria-labelledby="health-title">
+            <div className="card-title-row"><div><p className="eyebrow">Based on recorded finance data</p><h2 id="health-title">Financial health</h2></div><span className="health-badge">{financialHealth?.label ?? "Loading"}</span></div>
+            {financialHealth && <div className="health-content">
+              <div><strong className="health-amount">{formatCurrency(financialHealth.savingsAmount)}</strong><p className="health-caption">Recorded net cash flow</p><p className="health-note">This score uses cash flow, budget status, and unresolved items. Add income data for a more complete health view.</p></div>
+              <div className="health-gauge" style={{ "--health-score": `${(financialHealth.score ?? 0) * 3.6}deg` } as CSSProperties}><div><strong>{financialHealth.score ?? "—"}{financialHealth.score !== null ? "%" : ""}</strong><span>health score</span></div></div>
+            </div>}
+            {!financialHealth && <div className="chart-empty">Loading financial health…</div>}
           </article>
         </section>
 
@@ -959,10 +1024,13 @@ export default function App() {
             </form>
             {budgetStatus && <p role="status" style={{ marginTop: 12 }}>{budgetStatus}</p>}
             {!currentBudget.overall && <p style={{ marginTop: 18 }}>Set a monthly expense budget to receive spending alerts.</p>}
-            {currentBudget.overall && <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
+            {currentBudget.overall && <div className="budget-overview">
+              <div className="budget-summary">
               <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 12 }}><strong style={{ display: "inline", margin: 0, fontSize: "inherit" }}>{formatCurrency(currentBudget.overall.spent)} spent of {formatCurrency(currentBudget.overall.limit)}</strong><span>{currentBudget.month} · {currentBudget.overall.percent_used}% used</span></div>
               <div className="budget-progress" aria-label={`${currentBudget.overall.percent_used}% of monthly budget used`}><span className={currentBudget.overall.percent_used >= 100 ? "budget-danger" : currentBudget.overall.percent_used >= 80 ? "budget-warning" : "budget-healthy"} style={{ width: `${Math.min(currentBudget.overall.percent_used, 100)}%` }} /></div>
               <p className={currentBudget.overall.percent_used >= 100 ? "budget-danger-text" : currentBudget.overall.percent_used >= 80 ? "budget-warning-text" : "budget-healthy-text"}>{currentBudget.overall.percent_used >= 100 ? `Budget exceeded by ${formatCurrency(Math.abs(currentBudget.overall.remaining))}.` : currentBudget.overall.percent_used >= 80 ? `Budget warning: only ${formatCurrency(currentBudget.overall.remaining)} remains.` : `${formatCurrency(currentBudget.overall.remaining)} remains this month.`}</p>
+              </div>
+              <div className="budget-orbit" style={{ "--budget-used": `${Math.min(currentBudget.overall.percent_used, 100) * 3.6}deg` } as CSSProperties}><span>{currentBudget.overall.percent_used}%</span><small>used</small></div>
             </div>}
             <div style={{ marginTop: 28 }}>
               <h3 style={{ margin: 0, fontSize: "1rem" }}>Category budgets</h3>
@@ -984,7 +1052,7 @@ export default function App() {
           </>}
         </section>
 
-        <section className="metric-card" aria-labelledby="insights-title" style={{ marginTop: 24 }}>
+        <section className="metric-card smart-insights-card" aria-labelledby="insights-title" style={{ marginTop: 24 }}>
           <p className="eyebrow">Smart, data-driven guidance</p>
           <h2 id="insights-title">Money insights</h2>
           {!summary && <p>Loading insights...</p>}
@@ -1033,9 +1101,10 @@ export default function App() {
         <section className="dashboard-detail-grid" aria-label="Detailed spending analysis">
           <details className="metric-card expandable-card">
             <summary><span><span className="eyebrow">Spending patterns</span><strong id="top-merchants-title">Top merchants</strong></span><span className="details-count">{summary?.top_merchants.length ?? 0}</span></summary>
-            <div className="expandable-content">
+            <div className="expandable-content visual-detail-content">
               {!summary && <p>Loading merchants...</p>}
               {summary?.top_merchants.length === 0 && <p>No merchant data yet.</p>}
+              {merchantEntries.length > 0 && <div className="mini-donut" aria-label="Top merchant share" role="img" style={{ background: merchantDonut } as CSSProperties} />}
               <ol className="ranked-list">
                 {summary?.top_merchants.slice(0, 5).map((merchant) => (
                   <li key={merchant.merchant}><span>{merchant.merchant}</span><strong>{formatCurrency(merchant.amount)}</strong></li>
@@ -1045,9 +1114,10 @@ export default function App() {
           </details>
           <details className="metric-card expandable-card">
             <summary><span><span className="eyebrow">Where your money goes</span><strong id="category-title">Spend by category</strong></span><span className="details-count">{categoryEntries.length}</span></summary>
-            <div className="expandable-content">
+            <div className="expandable-content visual-detail-content">
               {!summary && <p>Loading categories...</p>}
               {summary && Object.keys(summary.category_summary).length === 0 && <p>No category data yet.</p>}
+              {categoryEntries.length > 0 && <div className="mini-donut" aria-label="Category share" role="img" style={{ background: categoryDonut } as CSSProperties} />}
               <ol className="ranked-list">
                 {categoryEntries.map(([category, amount]) => (
                   <li key={category}><span>{category}</span><strong>{formatCurrency(amount)}</strong></li>
@@ -1057,19 +1127,21 @@ export default function App() {
           </details>
         </section>
 
-        <section className="metric-card" aria-labelledby="review-title" style={{ marginTop: 24 }}>
-          <p className="eyebrow">Human verification</p>
-          <h2 id="review-title">Review required</h2>
+        <section className="metric-card review-workspace" aria-labelledby="review-title" style={{ marginTop: 24 }}>
+          <div className="review-heading">
+            <div><p className="eyebrow">Action center</p><h2 id="review-title">Items to confirm</h2></div>
+            <span className="review-count">{reviewTransactions.length + reviewLogs.length} waiting</span>
+          </div>
           {reviewError && <p role="alert">{reviewError}</p>}
           {!reviewError && reviewTransactions.length === 0 && reviewLogs.length === 0 && <p>No pending reviews.</p>}
-          <div style={{ display: "grid", gap: 12, marginTop: 20 }}>
+          <div className="review-queue">
             {reviewTransactions.map((transaction) => (
-              <article key={transaction._id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 16, border: "1px solid #e0e7f1", borderRadius: 12 }}>
+              <article key={transaction._id} className="review-item">
                 <div>
                   <strong>{transaction.merchant}</strong>
-                  <p style={{ margin: "5px 0 0", color: "#64748b" }}>{formatCurrency(transaction.amount)} · {transaction.category} · {transaction.ai_reason || "Needs confirmation"}</p>
+                  <p style={{ margin: "5px 0 0", color: "#64748b" }}>{formatCurrency(transaction.amount)} · {transaction.category} · {readableReviewDetail(transaction.ai_reason)}</p>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div className="review-actions">
                   <button className="theme-toggle" disabled={reviewingId === transaction._id} onClick={() => reviewTransaction(transaction._id, "approve")} type="button">Approve</button>
                   <button className="theme-toggle" disabled={reviewingId === transaction._id} onClick={() => openEditReview(transaction)} type="button">Edit & Approve</button>
                   <button className="theme-toggle" disabled={reviewingId === transaction._id} onClick={() => reviewTransaction(transaction._id, "reject")} type="button">Reject</button>
@@ -1077,16 +1149,16 @@ export default function App() {
               </article>
             ))}
           </div>
-          {reviewLogs.length > 0 && <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-            <h3 style={{ margin: 0, fontSize: "1rem" }}>Email items needing confirmation</h3>
-            <p style={{ margin: 0 }}>These emails were not added as transactions because the extracted details need confirmation. They do not affect your records.</p>
+          {reviewLogs.length > 0 && <div className="review-log-group">
+            <h3>Email items to confirm</h3>
+            <p>These emails have not affected your records. Confirm their details when you are ready.</p>
             {reviewLogs.map((log) => {
               const proposal = log.proposed_transaction;
               const canApprove = Boolean(proposal?.date && proposal.merchant && proposal.amount && proposal.category && ["debit", "credit", "income", "expense", "investment", "transfer", "refund"].includes(proposal.transaction_type || ""));
-              return <article key={log._id} style={{ padding: 16, border: "1px solid #e0e7f1", borderRadius: 12 }}>
+              return <article key={log._id} className="review-item review-email-item">
                 <strong>{log.subject || "Transaction email"}</strong>
-                <p style={{ margin: "5px 0 0", color: "#64748b" }}>{log.from || "Unknown sender"}{log.reason || log.error ? ` · ${log.reason || log.error}` : ""}{log.created_at ? ` · ${new Date(log.created_at).toLocaleString()}` : ""}</p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                <p style={{ margin: "5px 0 0", color: "#64748b" }}>{log.from || "Unknown sender"} · {readableReviewDetail(log.reason || log.error)}{log.created_at ? ` · ${new Date(log.created_at).toLocaleString()}` : ""}</p>
+                <div className="review-actions">
                   {canApprove && <button className="theme-toggle" disabled={reviewingId === log._id} onClick={() => resolveGmailReviewLog(log._id, "approve")} type="button">Approve & add</button>}
                   <button className="theme-toggle" disabled={reviewingId === log._id} onClick={() => openEditGmailReview(log)} type="button">Edit & add</button>
                   <button className="theme-toggle" disabled={reviewingId === log._id} onClick={() => resolveGmailReviewLog(log._id, "reject")} type="button">Ignore email</button>
@@ -1096,7 +1168,21 @@ export default function App() {
           </div>}
         </section>
 
-        <section className="metric-card" aria-labelledby="bills-due-title" style={{ marginTop: 24 }}>
+        <section className="dashboard-utilities" aria-label="Finance tools and activity">
+        <details className="metric-card expandable-card compact-utility">
+          <summary><span><span className="eyebrow">Email ingestion</span><strong id="gmail-sync-title">Gmail sync</strong></span><span className="details-count">{gmailConnected ? "On" : "Off"}</span></summary>
+          <div className="expandable-content">
+            <p>{gmailConnectionMessage || "Checking Gmail connection..."}</p>
+            {gmailConnected === false && <button className="theme-toggle" onClick={() => window.location.assign(`${API_BASE_URL}/auth/google`)} type="button">Connect Gmail</button>}
+            {gmailConnected && <div className="utility-actions"><button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={syncGmail} type="button">{syncingGmail ? "Syncing..." : "Sync Gmail"}</button><button className="theme-toggle" disabled={syncingGmail || disconnectingGmail} onClick={disconnectGmail} type="button">Disconnect</button></div>}
+            {syncStatus && <p role="status">{syncStatus}</p>}
+          </div>
+        </details>
+        <details className="metric-card expandable-card compact-utility">
+          <summary><span><span className="eyebrow">Recent activity</span><strong id="gmail-logs-title">Gmail logs</strong></span><span className="details-count">{gmailLogs.length}</span></summary>
+          <div className="expandable-content utility-log-list">{gmailLogsError && <p role="alert">{gmailLogsError}</p>}{!gmailLogsError && gmailLogs.length === 0 && <p>No Gmail processing logs yet.</p>}{gmailLogs.slice(0, 5).map((log) => <article className="timeline-item" key={log._id}><strong>{log.subject || "Transaction email"}</strong><p>{formatGmailStatus(log.status)}</p></article>)}</div>
+        </details>
+        <section className="metric-card compact-utility" aria-labelledby="bills-due-title">
           <p className="eyebrow">Upcoming payments</p>
           <h2 id="bills-due-title">Bills due</h2>
           <p style={{ marginTop: 10 }}>Total due: <span style={{ color: "inherit", fontWeight: 800 }}>{formatCurrency(billsDueTotal)}</span></p>
@@ -1112,7 +1198,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="metric-card" aria-labelledby="export-title" style={{ marginTop: 24 }}>
+        <section className="metric-card compact-utility" aria-labelledby="export-title">
           <p className="eyebrow">Your data</p>
           <h2 id="export-title">Export transactions</h2>
           <p style={{ marginTop: 10 }}>Download a copy of your transaction data for analysis or backup.</p>
@@ -1122,7 +1208,7 @@ export default function App() {
           </div>
         </section>
 
-        <section className="metric-card" aria-labelledby="receipt-title" style={{ marginTop: 24 }}>
+        <section className="metric-card compact-utility" aria-labelledby="receipt-title">
           <p className="eyebrow">OCR and AI enrichment</p>
           <h2 id="receipt-title">Upload receipt</h2>
           <p style={{ marginTop: 10 }}>Upload a JPEG, PNG, or WebP receipt image for extraction and review.</p>
@@ -1133,7 +1219,9 @@ export default function App() {
           {receiptStatus && <p role="status" style={{ marginTop: 16 }}>{receiptStatus}</p>}
         </section>
 
-        <section className="metric-card" aria-labelledby="receipt-history-title" style={{ marginTop: 24 }}>
+        <details className="metric-card expandable-card compact-utility">
+          <summary><span><span className="eyebrow">Upload history</span><strong id="receipt-history-title">Recent receipts</strong></span><span className="details-count">{receipts.length}</span></summary>
+          <div className="expandable-content utility-log-list">
           <p className="eyebrow">Upload history</p>
           <h2 id="receipt-history-title">Recent receipts</h2>
           {receiptsError && <p role="alert">{receiptsError}</p>}
@@ -1146,9 +1234,10 @@ export default function App() {
               </article>
             ))}
           </div>
-        </section>
+          </div>
+        </details>
 
-        <section className="metric-card" aria-labelledby="bill-title" style={{ marginTop: 24 }}>
+        <section className="metric-card compact-utility" aria-labelledby="bill-title">
           <p className="eyebrow">Bill management</p>
           <h2 id="bill-title">Upload bill</h2>
           <p style={{ marginTop: 10 }}>Upload a JPEG, PNG, or WebP bill image for provider, amount, and due-date extraction.</p>
@@ -1159,7 +1248,9 @@ export default function App() {
           {billStatus && <p role="status" style={{ marginTop: 16 }}>{billStatus}</p>}
         </section>
 
-        <section className="metric-card" aria-labelledby="bill-history-title" style={{ marginTop: 24 }}>
+        <details className="metric-card expandable-card compact-utility">
+          <summary><span><span className="eyebrow">Bill management</span><strong id="bill-history-title">Recent bills</strong></span><span className="details-count">{visibleBills.length}</span></summary>
+          <div className="expandable-content">
           <p className="eyebrow">Upload history</p>
           <h2 id="bill-history-title">Recent bills</h2>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: 12, marginTop: 16 }}>
@@ -1196,11 +1287,13 @@ export default function App() {
               </article>
             ))}
           </div>
+          </div>
+        </details>
         </section>
         </>}
 
         {activePage === "Transactions" && (
-          <section className="metric-card workspace-card" aria-labelledby="transactions-title">
+          <section className="metric-card workspace-card transactions-workspace" aria-labelledby="transactions-title">
             <div className="workspace-heading"><div><p className="eyebrow">Review history and records</p><h2 id="transactions-title">Transactions ledger</h2><p>Capture, filter, and review every financial movement in one place.</p></div><span className="workspace-stat">{transactions.length} loaded</span></div>
             <form className="data-entry-form" onSubmit={addTransaction}>
               <label>Date<input required type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} /></label>
@@ -1339,7 +1432,8 @@ export default function App() {
             </div>}</>}
           </section>
 
-          <section className="metric-card" aria-labelledby="trend-title" style={{ marginTop: 24 }}>
+          <div className="report-visual-grid">
+          <section className="metric-card report-visual-card" aria-labelledby="trend-title">
             <p className="eyebrow">Monthly spending</p>
             <h2 id="trend-title">Spend trend</h2>
             {summary?.monthly_trend.length === 0 && <p>No monthly spending data yet.</p>}
@@ -1355,7 +1449,7 @@ export default function App() {
             </div>
           </section>
 
-          <section className="metric-card" aria-labelledby="report-category-title" style={{ marginTop: 24 }}>
+          <section className="metric-card report-visual-card" aria-labelledby="report-category-title">
             <p className="eyebrow">Spending distribution</p>
             <h2 id="report-category-title">Category breakdown</h2>
             {summary && categoryEntries.length === 0 && <p>No category data yet.</p>}
@@ -1370,6 +1464,7 @@ export default function App() {
               ))}
             </div>
           </section>
+          </div>
         </>}
 
         {activePage === "Profile" && (
